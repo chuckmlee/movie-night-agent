@@ -135,6 +135,9 @@ def sync(username: str, data: Path = DATA, limit: int | None = None, log=print) 
         snapshot[slug] = entry["availability"]
     save_json(cache_path, cache)
     save_json(data / "availability" / f"{today}.json", snapshot)
+    # Written only when a run reaches the end, so a sync cut off by a restart
+    # is redone on the next boot (Railway, Nov 10).
+    save_json(data / "sync-complete.json", {"at": dt.datetime.now(dt.timezone.utc).isoformat(), "films": len(on_list)})
 
     included = sum(1 for a in snapshot.values() if a["included"])
     stats.update(on_watchlist=len(on_list), with_availability=len(snapshot), streaming_on_household=included)

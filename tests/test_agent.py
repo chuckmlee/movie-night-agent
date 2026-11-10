@@ -26,14 +26,15 @@ class FakeLinq:
     """Stands in for the Linq API: keeps a list of messages and records sends."""
 
     def __init__(self):
-        self.msgs, self.sent, self.n = [], [], 0
+        self.msgs, self.sent, self.bodies, self.n = [], [], [], 0
 
-    def _add(self, handle, text=None, is_me=False, link=None):
+    def _add(self, handle, text=None, is_me=False, link=None, parts=None, reply_to=None):
         self.n += 1
         mid = f"m{self.n}"
-        part = {"type": "link", "value": link} if link else {"type": "text", "value": text}
-        self.msgs.append({"id": mid, "created_at": f"2026-11-10T00:{self.n:02d}:00Z",
-                          "from_handle": {"handle": handle, "is_me": is_me}, "parts": [part]})
+        if parts is None:
+            parts = [{"type": "link", "value": link} if link else {"type": "text", "value": text}]
+        self.msgs.append({"id": mid, "created_at": f"2026-11-10T00:{self.n:02d}:00Z", "reply_to": reply_to,
+                          "from_handle": {"handle": handle, "is_me": is_me}, "parts": [dict(p) for p in parts]})
         return mid
 
     def human(self, handle, text):
@@ -46,9 +47,10 @@ class FakeLinq:
         return list(self.msgs)
 
     def send(self, chat_id, body):
-        part = body["message"]["parts"][0]
-        self.sent.append(part["value"])
-        return self._add("+1agent", is_me=True, **({"link": part["value"]} if part["type"] == "link" else {"text": part["value"]}))
+        parts = body["message"]["parts"]
+        self.sent.append(parts[-1]["value"])  # the text (or link) of each message
+        self.bodies.append(body)
+        return self._add("+1agent", is_me=True, parts=parts, reply_to=body["message"].get("reply_to"))
 
     def say(self, chat_id, text):
         return self.send(chat_id, {"message": {"parts": [{"type": "text", "value": text}]}})
@@ -92,7 +94,8 @@ class Flow(unittest.TestCase):
         self.linq.human(A, "hey")  # B never texts, only reacts
 
     def poll(self, now=0.0):
-        return step(self.linq, "chat", self.state, CACHE, self.history, seed=0, now=now)
+        return step(self.linq, "chat", self.state, CACHE, self.history, seed=0, now=now,
+                    posters=lambda tmdb_id: "/poster.jpg")
 
     def test_quiet_until_kickoff(self):
         self.assertIsNone(self.poll())
@@ -169,8 +172,41 @@ class Flow(unittest.TestCase):
         self.linq.human(B, "tally")
         self.assertEqual(self.poll(), "tally: bravo")
 
+    def test_pick_is_poster_then_text_with_no_trailer(self):
+        self.linq.human(A, "movie")
+        self.poll()
+        bodies = [b for b in self.linq.bodies if b["message"]["parts"][0]["type"] == "media"]
+        self.assertEqual(len(bodies), len(self.state.active["films"]))
+        self.assertEqual(bodies[0]["message"]["parts"][0]["url"], "https://image.tmdb.org/t/p/w500/poster.jpg")
+        self.assertFalse(any(p["type"] == "link" for b in self.linq.bodies for p in b["message"]["parts"]))
+        self.assertIn("👀 for a trailer", self.linq.sent[0])
+
+    def test_eyes_sends_trailer_once_as_reply(self):
+        self.linq.human(A, "movie")
+        self.poll()
+        pick = pick_msg(self.linq, self.state, "alpha")
+        self.linq.react(pick, A, "👀")
+        self.assertEqual(self.poll(), "trailer: alpha")
+        last = self.linq.bodies[-1]["message"]
+        self.assertEqual(last["parts"], [{"type": "link", "value": "https://youtu.be/Alpha"}])
+        self.assertEqual(last["reply_to"], {"message_id": pick})
+        self.linq.react(pick, B, "👀")  # second 👀 on the same film: no repeat
+        n = len(self.linq.sent)
+        self.assertIsNone(self.poll())
+        self.assertEqual(len(self.linq.sent), n)
+
+    def test_eyes_is_not_a_vote(self):
+        self.linq.human(A, "movie")
+        self.poll()
+        self.linq.react(pick_msg(self.linq, self.state, "alpha"), A, "👀")
+        self.linq.react(pick_msg(self.linq, self.state, "alpha"), B, "👀")
+        self.poll(now=1)
+        self.assertIsNone(self.poll(now=200))  # nobody has a 🥇, so no tally
+
     def test_trailer_reactions_count(self):
         self.linq.human(A, "movie")
+        self.poll()
+        self.linq.react(pick_msg(self.linq, self.state, "alpha"), A, "👀")
         self.poll()
         trailer = [mid for mid, s in self.state.active["msg_to_slug"].items() if s == "alpha"][-1]
         self.linq.react(trailer, A, "🥇")
@@ -212,7 +248,7 @@ class Flow(unittest.TestCase):
                             "bravo": [0.1, "z"], "charlie": [0.1, "w"]}, "wildcards": wild}
         cache = {**CACHE, **wild}
         self.linq.human(A, "movie night?")
-        self.assertTrue(step(self.linq, "chat", self.state, cache, self.history, seed=0, now=0, taste=taste)
+        self.assertTrue(step(self.linq, "chat", self.state, cache, self.history, seed=0, now=0, taste=taste, posters=lambda i: None)
                         .startswith("kickoff"))
         films = self.state.active["films"]
         self.assertEqual(len(films), 5)

@@ -57,3 +57,7 @@ A wildcard is a film the household hasn't rated and hasn't saved. It is labeled 
 ## 2026-11-10: Full rating history comes from the Letterboxd data export
 
 Letterboxd's bot check allows only the first page of /films/ (the newest 72), so the full history comes from the export the account owner downloads (Settings > Data). That is also the more honest route than working around the block.
+
+## 2026-11-10: A pick is one message with its poster; trailers come on 👀
+
+Each pick is one Linq message: the TMDB poster as a media part, then the short text. Votes on either part count. Trailers are no longer sent with every pick, because five link cards bury the picks. Reacting 👀 on a pick makes Delo reply in a thread under that pick with the trailer card, once per film. 👀 is a request, not a vote. A Letterboxd link card would also show artwork, but a link part has to be the only part in its message, so it would split each pick in two again.

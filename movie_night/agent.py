@@ -7,8 +7,9 @@ Flow, per DECISIONS.md:
 1. Someone kicks off ("movie night?", "movie tonight, something short", "movie?", 🎬).
    The agent only ever speaks after a kickoff like that.
 2. It reads hints from that message, picks 4-5 films from the synced watchlist,
-   and sends each as a text followed by its trailer link.
+   and sends each as one message: the poster, then a short text.
 3. People react 🥇 🥈 🥉 and veto with 🚫 or 👎. The tally is code (rules.py).
+   A 👀 on a pick asks for its trailer, which Delo sends as a threaded reply.
 4. When everyone has placed 🥇🥈🥉 (or has a 🥇 and stops changing reactions for
    90 seconds), or someone texts "tally" / "done", it announces
    the winner and why. It records vetoes and top picks for next time.
@@ -100,7 +101,7 @@ class Linq:
     def send(self, chat_id: str, body: dict) -> str:
         if self.dry_run:
             parts = body["message"]["parts"]
-            print("SEND:", " | ".join(p["value"] for p in parts))
+            print("SEND:", " | ".join(p.get("value") or p.get("url") or "" for p in parts))
             self._fake += 1
             return f"dry-{self._fake}"
         return self._call("POST", f"/chats/{chat_id}/messages", body)["message"]["id"]
@@ -186,6 +187,39 @@ def tmdb_lookup(title: str, year: int | None = None) -> dict | None:
         return None
 
 
+def poster_lookup(tmdb_id: int) -> str | None:
+    """tmdb.poster_path, but a TMDB outage just means a pick without its poster."""
+    try:
+        return tmdb.poster_path(tmdb_id)
+    except (urllib.error.URLError, TimeoutError, KeyError, ValueError):
+        return None
+
+
+def ensure_poster(entry: dict, fetch=poster_lookup) -> None:
+    """Films cached before posters were stored get theirs on first use."""
+    if "poster_path" not in entry and entry.get("tmdb_id"):
+        entry["poster_path"] = fetch(entry["tmdb_id"])
+
+
+def send_trailers(linq: Linq, chat_id: str, active: dict, cache: dict, msgs: list[dict]) -> list[str]:
+    """Answer each new 👀 on a pick with its trailer, threaded under that pick. Once per film."""
+    done = active.setdefault("trailers", [])
+    sent = []
+    for m in msgs:
+        slug = active["msg_to_slug"].get(m["id"])
+        if not slug or slug in done or not linq_format.wants_trailer(m):
+            continue
+        done.append(slug)
+        url = cache.get(slug, {}).get("trailer_url")
+        if url:
+            mid = linq.send(chat_id, linq_format.trailer_message(url, m["id"]))
+            active["msg_to_slug"][mid] = slug  # medals on the trailer card count too
+        else:
+            linq.say(chat_id, f"No trailer on file for {cache.get(slug, {}).get('title', slug)}, sorry.")
+        sent.append(slug)
+    return sent
+
+
 def everyone_gave_gold(session: Session) -> bool:
     return all(Reaction.GOLD in session.state[p] for p in session.people)
 
@@ -211,7 +245,7 @@ def ready_to_tally(session: Session, active: dict, now: float) -> bool:
 
 def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict],
          names: dict[str, str] | None = None, seed: int | None = None, now: float | None = None,
-         lookup=None, taste: dict | None = None) -> str | None:
+         lookup=None, taste: dict | None = None, posters=poster_lookup) -> str | None:
     """One poll. Returns what happened, for logging. `lookup` resolves "like X" titles (tmdb.search)."""
     names = names or {}
     if state.active and state.active.get("entries"):
@@ -249,24 +283,26 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         hist = history_for(history)
         no_veto = [names.get(p, p) for p in people if p in hist.vetoed_last_session]
         intro = (f"🍿 {p.note}: " if p.note else "🍿 ") + \
-            f"{p.summary()}. React 🥇 🥈 🥉, veto with 👎."
+            f"{p.summary()}. React 🥇 🥈 🥉, veto with 👎, 👀 for a trailer."
         if no_veto:
             intro += f" ({', '.join(no_veto)}: no veto tonight, you used one last time.)"
         linq.say(chat_id, intro)
         msg_to_slug = {}
         for slug in slugs:
-            for body in linq_format.pick_messages(linq_format.pick_from_cache(cache[slug], p.reasons.get(slug))):
-                msg_to_slug[linq.send(chat_id, body)] = slug
+            ensure_poster(cache[slug], posters)
+            body = linq_format.pick_message(linq_format.pick_from_cache(cache[slug], p.reasons.get(slug)))
+            msg_to_slug[linq.send(chat_id, body)] = slug
         state.active = {"kickoff_id": kick["id"], "films": slugs, "msg_to_slug": msg_to_slug,
                         "entries": {s: cache[s] for s in p.wildcards},
                         "started": dt.datetime.now(dt.timezone.utc).isoformat()}
         return f"kickoff: sent {len(slugs)} picks"
 
+    trailers = send_trailers(linq, chat_id, state.active, cache, msgs)
     session = build_session(state.active, cache, msgs, people, history_for(history))
     asked = any(TALLY_RE.search(_bare(_text(m))) for m in new)
     now = time.time() if now is None else now
     if not (asked or ready_to_tally(session, state.active, now)):
-        return None
+        return f"trailer: {', '.join(trailers)}" if trailers else None
     result = session.tally()
     linq.say(chat_id, explain(result, cache, names))
     tops = session.top_picks()

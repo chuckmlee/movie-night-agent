@@ -58,6 +58,7 @@ class Enrichment:
     overview: str
     availability: Availability
     keywords: list[str] = field(default_factory=list)  # TMDB topic tags, e.g. "spy", "folk horror"
+    poster_path: str | None = None  # e.g. "/x2FJsf1ElAgr63Y3PNPtJrcmpoe.jpg"; see linq_format.POSTER_BASE
 
 
 def _get(path: str, **params) -> dict:
@@ -114,11 +115,16 @@ def parse_details(d: dict) -> Enrichment:
         overview=d.get("overview") or "",
         availability=parse_availability(((d.get("watch/providers") or {}).get("results") or {}).get("US")),
         keywords=[k["name"] for k in (d.get("keywords") or {}).get("keywords", [])],
+        poster_path=d.get("poster_path"),
     )
 
 
 def enrich(tmdb_id: int) -> Enrichment:
     return parse_details(_get(f"/movie/{tmdb_id}", append_to_response="videos,watch/providers,keywords"))
+
+
+def poster_path(tmdb_id: int) -> str | None:
+    return _get(f"/movie/{tmdb_id}").get("poster_path")
 
 
 def keywords(tmdb_id: int) -> list[str]:

@@ -143,6 +143,7 @@ def _details(tmdb_id: int) -> dict:
         "vote_count": d.get("vote_count"),
         "overview": d.get("overview") or "",
         "trailer_url": tmdb.pick_trailer((d.get("videos") or {}).get("results", [])),
+        "poster_path": d.get("poster_path"),
         "availability": asdict(tmdb.parse_availability(((d.get("watch/providers") or {}).get("results") or {}).get("US"))),
     }
 

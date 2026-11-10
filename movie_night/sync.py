@@ -103,7 +103,7 @@ def sync(username: str, data: Path = DATA, limit: int | None = None, log=print) 
                 continue
             entry.update(runtime_min=e.runtime_min, genres=e.genres, trailer_url=e.trailer_url,
                          overview=e.overview, availability=asdict(e.availability), availability_checked=today,
-                         keywords=e.keywords)
+                         keywords=e.keywords, poster_path=e.poster_path)
             time.sleep(TMDB_DELAY)
         elif "keywords" not in entry:  # backfill for films cached before keywords existed
             try:

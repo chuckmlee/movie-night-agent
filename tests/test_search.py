@@ -92,7 +92,7 @@ class FakeLinq:
         return list(self.msgs)
 
     def send(self, chat_id, body):
-        v = body["message"]["parts"][0]["value"]
+        v = body["message"]["parts"][-1]["value"]
         self.sent.append(v)
         return self._add("me", v, is_me=True)
 
@@ -104,7 +104,7 @@ class AgentKickoff(unittest.TestCase):
     def run_one(self, text):
         linq, state = FakeLinq(), State()
         linq._add("a", text)
-        what = step(linq, "chat", state, CACHE, [], seed=0, now=0, lookup=lookup)
+        what = step(linq, "chat", state, CACHE, [], seed=0, now=0, lookup=lookup, posters=lambda tmdb_id: None)
         return what, linq.sent
 
     def test_like_request_without_movie_words(self):

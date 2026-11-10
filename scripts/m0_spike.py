@@ -27,6 +27,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 BASE = os.environ.get("LINQ_BASE", "https://api.linqapp.com/api/partner/v3")
+INTRO = "Movie night agent test 🍿 One test pick coming next."
+
 TEST_PICK = (
     "Movie night test 🎬 React to this message with 🥇 🥈 🥉 or 🚫 (long-press, then the + for any emoji).\n"
     "Arrival (2016) · 1h 56m\n"
@@ -56,11 +58,15 @@ def cmd_group(args):
     phones = [p.strip() for p in os.environ.get("MNA_PHONES", "").split(",") if p.strip()]
     if len(phones) < 2:
         sys.exit("set MNA_PHONES to at least two E.164 numbers, comma separated")
-    body = {"to": phones, "message": {"parts": [{"type": "text", "value": TEST_PICK}]}}
-    if args.from_number:
-        body["from"] = args.from_number
+    # Linq requires a sender line, and rejects links in the first message of a new chat,
+    # so open with a plain intro and send the pick (with its trailer link) second.
+    body = {"to": phones, "from": args.from_number,
+            "message": {"parts": [{"type": "text", "value": INTRO}]}}
     out = call("POST", "/chats", body)
     print(json.dumps(out, indent=2))
+    chat_id = (out.get("chat") or out).get("id")
+    pick = {"message": {"parts": [{"type": "text", "value": TEST_PICK}]}}
+    print(json.dumps(call("POST", f"/chats/{chat_id}/messages", pick), indent=2))
 
 
 def cmd_poll(args):
@@ -87,7 +93,7 @@ def main():
     sub = ap.add_subparsers(required=True)
     sub.add_parser("numbers").set_defaults(fn=cmd_numbers)
     g = sub.add_parser("group")
-    g.add_argument("--from-number", help="Linq line to send from, if the account has several")
+    g.add_argument("--from-number", required=True, help="Linq line to send from (E.164)")
     g.set_defaults(fn=cmd_group)
     p = sub.add_parser("poll")
     p.add_argument("chat_id")

@@ -2,6 +2,14 @@
 
 Newest first. Each entry says what was decided and why.
 
+## 2026-11-10: Poll first, host later
+
+Chuck chose to defer hosting. M2 polls the group chat every few seconds from wherever it runs, so real sessions can be tried before paying for a server or setting up webhooks.
+
+## 2026-11-10: v1 reads hints with keywords, not an LLM
+
+"short", "under 2 hours", "funny", "no horror", "nothing heavy", "ok to rent" cover the common asks and are fully testable. The "why" line is the Letterboxd rating for now. An LLM can take over hint parsing and the why line later without touching the vote.
+
 ## 2026-11-10: Picks are rich, standard iMessage messages
 
 Each pick is a short text (title and year, then runtime, genres and where to watch, then one line on why) followed by its trailer as a standalone link, which iMessage turns into a preview card. A link inside the text gets no preview (seen live in M0). Chuck wants this richer, standard format, and will revisit once real multi-pick sessions run. A veto counts as a 👎 tapback or a 🚫 emoji.

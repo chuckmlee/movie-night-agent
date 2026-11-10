@@ -1,0 +1,7 @@
+# Extra Letterboxd handles for the trusted circle, one per line.
+# The first page of /following/ is read live; later pages are bot-blocked,
+# so people listed there go here.
+vnkrsndh
+snassif
+universzero
+paulschradernot

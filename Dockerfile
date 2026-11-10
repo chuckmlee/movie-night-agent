@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 COPY movie_night ./movie_night
 COPY household ./household
 ENV PYTHONUNBUFFERED=1 MNA_DATA=/data

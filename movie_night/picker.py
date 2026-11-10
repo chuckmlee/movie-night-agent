@@ -190,7 +190,8 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
         slugs = choose(cache, h, n=n - len(wild), exclude=exclude, seed=seed, taste=scores)
         reasons = {}
         for s in slugs:
-            line = " · ".join(x for x in ((scores.get(s) or [None, None])[1], _rating_line(cache[s])) if x)
+            first, _, rest = ((scores.get(s) or [None, ""])[1] or "").partition("\n")
+            line = " · ".join(x for x in (first, _rating_line(cache[s])) if x) + (f"\n{rest}" if rest else "")
             if line:
                 reasons[s] = line
         for s in wild:

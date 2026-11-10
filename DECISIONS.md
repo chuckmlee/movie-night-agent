@@ -2,6 +2,10 @@
 
 Newest first. Each entry says what was decided and why.
 
+## 2026-11-10: Host on Railway
+
+Chuck picked Railway: it deploys from the GitHub repo on every merge, with no command line, so features ship as soon as a PR is approved. One container runs the agent, the daily sync and a health check, with a volume at /data. It replaces "poll first, host later". The agent still polls; webhooks come later.
+
 ## 2026-11-10: Poll first, host later
 
 Chuck chose to defer hosting. M2 polls the group chat every few seconds from wherever it runs, so real sessions can be tried before paying for a server or setting up webhooks.

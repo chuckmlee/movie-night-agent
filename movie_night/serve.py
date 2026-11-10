@@ -12,7 +12,10 @@
 Config comes from the environment (set on the host, never committed):
   LINQ_TOKEN, TMDB_TOKEN   API credentials
   MNA_CHAT_ID              the household group chat id
-  MNA_LETTERBOXD_USER      whose watchlist (default: chucklee)
+  MNA_LETTERBOXD_USER      whose watchlist and ratings (default: chucklee)
+  MNA_LETTERBOXD_EXPORT    unzipped Letterboxd data export, for the full rating
+                           history (default: $MNA_DATA/letterboxd-export, then
+                           household/letterboxd in the repo, if either exists)
   MNA_DATA                 persistent directory (default: data; mount a volume here)
   SYNC_HOUR_UTC            default 10 (5 or 6am in New York)
   PORT                     default 8080
@@ -31,6 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import sync as sync_mod
+from . import taste as taste_mod
 from . import tmdb
 from .agent import Linq, State, load_history, step, tmdb_lookup
 
@@ -74,6 +78,14 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def export_dir(data: Path) -> Path | None:
+    for cand in (os.environ.get("MNA_LETTERBOXD_EXPORT"), data / "letterboxd-export",
+                 Path(__file__).resolve().parent.parent / "household" / "letterboxd"):
+        if cand and (Path(cand) / "ratings.csv").exists():
+            return Path(cand)
+    return None
+
+
 def run_sync(user: str, data: Path) -> None:
     try:
         stats = sync_mod.sync(user, data, log=log)
@@ -81,6 +93,12 @@ def run_sync(user: str, data: Path) -> None:
     except Exception as e:  # a failed sync must not take the agent down
         STATUS["errors"] += 1
         log(f"sync failed: {e!r}")
+    try:  # the taste profile reads the fresh cache; picks fall back to ratings without it
+        out = taste_mod.build(user, data, export=export_dir(data), log=log)
+        STATUS["last_taste"] = {"at": out["built"], "rated": out["rated"], "wildcards": len(out["wildcards"])}
+    except Exception as e:
+        STATUS["errors"] += 1
+        log(f"taste profile failed: {e!r}")
 
 
 def sync_loop(user: str, data: Path, hour: int) -> None:
@@ -94,6 +112,8 @@ def sync_loop(user: str, data: Path, hour: int) -> None:
         SYNC_READY.set()  # answer from the cache we have while the sync catches up
     if stale:
         run_sync(user, data)
+    elif not (data / "taste.json").exists():
+        run_sync(user, data)  # first boot with taste: build it now, not tomorrow
     SYNC_READY.set()
     while True:
         now = dt.datetime.now(dt.timezone.utc)
@@ -139,7 +159,10 @@ def agent_loop(chat: str, data: Path, every: float) -> None:
                 state.save(state_path)
                 log(f"agent: watching chat, {len(state.seen)} existing messages skipped")
             cache = json.loads((data / "films.json").read_text())  # picks up the daily sync
-            what = step(linq, chat, state, cache, history, lookup=tmdb_lookup)
+            taste = taste_mod.load(data)
+            if taste:
+                cache.update(taste.get("wildcards") or {})
+            what = step(linq, chat, state, cache, history, lookup=tmdb_lookup, taste=taste)
             STATUS["last_poll"] = dt.datetime.now(dt.timezone.utc).isoformat()
             if what:
                 STATUS["last_event"] = what

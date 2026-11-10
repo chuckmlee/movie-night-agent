@@ -211,9 +211,13 @@ def ready_to_tally(session: Session, active: dict, now: float) -> bool:
 
 def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict],
          names: dict[str, str] | None = None, seed: int | None = None, now: float | None = None,
-         lookup=None) -> str | None:
+         lookup=None, taste: dict | None = None) -> str | None:
     """One poll. Returns what happened, for logging. `lookup` resolves "like X" titles (tmdb.search)."""
     names = names or {}
+    if state.active and state.active.get("entries"):
+        # Wildcards live in taste.json, which the daily rebuild may change
+        # mid-session; the session keeps its own copy.
+        cache = {**state.active["entries"], **cache}
     msgs = linq.messages(chat_id)
     # Chat members, not just people who have texted: someone who only ever
     # reacts still has to vote before the tally (first live session, Nov 10).
@@ -228,7 +232,7 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
     if kick:
         text = _text(kick)
         recent = {s for h in history[-RECENT_SESSIONS_EXCLUDED:] for s in h.get("films", [])}
-        p = plan(text, cache, exclude=recent, seed=seed, lookup=lookup)
+        p = plan(text, cache, exclude=recent, seed=seed, lookup=lookup, taste=taste)
         if not KICKOFF_RE.search(text) and (p.note or "").startswith("I couldn't find"):
             p = None  # "something like that" in passing; not a request
     if p is not None and state.active is not None:
@@ -245,7 +249,7 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         hist = history_for(history)
         no_veto = [names.get(p, p) for p in people if p in hist.vetoed_last_session]
         intro = (f"🍿 {p.note}: " if p.note else "🍿 ") + \
-            f"{len(slugs)} picks from the watchlist. React 🥇 🥈 🥉, veto with 👎."
+            f"{p.summary()}. React 🥇 🥈 🥉, veto with 👎."
         if no_veto:
             intro += f" ({', '.join(no_veto)}: no veto tonight, you used one last time.)"
         linq.say(chat_id, intro)
@@ -254,6 +258,7 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
             for body in linq_format.pick_messages(linq_format.pick_from_cache(cache[slug], p.reasons.get(slug))):
                 msg_to_slug[linq.send(chat_id, body)] = slug
         state.active = {"kickoff_id": kick["id"], "films": slugs, "msg_to_slug": msg_to_slug,
+                        "entries": {s: cache[s] for s in p.wildcards},
                         "started": dt.datetime.now(dt.timezone.utc).isoformat()}
         return f"kickoff: sent {len(slugs)} picks"
 

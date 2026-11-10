@@ -204,6 +204,30 @@ class Flow(unittest.TestCase):
         self.assertEqual(find_like(t), ("Memories of a Murder", None))
         self.assertTrue(_is_kickoff("Movies like Memories of a Murder"))
 
+    def test_taste_ranks_picks_and_adds_wildcards(self):
+        wild = {f"tmdb-{i}": {**film(f"Wild{i}", None, ["Crime"], services=(), rent=("Apple TV",)),
+                              "on_watchlist": False, "wildcard": True, "tmdb_id": 100 + i, "score": 10 - i,
+                              "reason": "Like Chinatown (5★)"} for i in range(3)}
+        taste = {"scores": {"echo": [1.0, "x"], "delta": [20.0, "Like Cure (4.5★)"], "alpha": [0.1, "y"],
+                            "bravo": [0.1, "z"], "charlie": [0.1, "w"]}, "wildcards": wild}
+        cache = {**CACHE, **wild}
+        self.linq.human(A, "movie night?")
+        self.assertTrue(step(self.linq, "chat", self.state, cache, self.history, seed=0, now=0, taste=taste)
+                        .startswith("kickoff"))
+        films = self.state.active["films"]
+        self.assertEqual(len(films), 5)
+        self.assertEqual(films[0], "delta")  # best taste score, well clear of the jitter
+        self.assertEqual(sum(f.startswith("tmdb-") for f in films), 2)
+        self.assertIn("3 picks from the watchlist and 2 wildcards", self.linq.sent[0])
+        self.assertTrue(any("🃏 Wildcard" in m for m in self.linq.sent))
+        # The daily rebuild drops a wildcard mid-session; the tally still knows it.
+        w = next(f for f in films if f.startswith("tmdb-"))
+        for who in (A, B):
+            self.linq.react(pick_msg(self.linq, self.state, w), who, "🥇")
+        self.linq.human(A, "tally")
+        self.assertEqual(step(self.linq, "chat", self.state, CACHE, self.history, seed=0, now=1), f"tally: {w}")
+        self.assertIn(f"🏆 Tonight: {wild[w]['title']}", self.linq.sent[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

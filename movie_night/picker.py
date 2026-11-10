@@ -54,11 +54,12 @@ def parse_hints(text: str) -> Hints:
     return h
 
 
-def eligible(entry: dict, hints: Hints) -> bool:
-    if not entry.get("on_watchlist") or not entry.get("tmdb_id"):
+def eligible(entry: dict, hints: Hints, wildcard: bool = False) -> bool:
+    """Wildcards may be rentals: they're labeled, and there are only two."""
+    if not entry.get("tmdb_id") or bool(entry.get("on_watchlist")) == wildcard:
         return False
     avail = entry.get("availability") or {}
-    if not (avail.get("included") or (hints.allow_rent and avail.get("rent"))):
+    if not (avail.get("included") or ((hints.allow_rent or wildcard) and avail.get("rent"))):
         return False
     rt = entry.get("runtime_min")
     if hints.max_runtime and (not rt or rt > hints.max_runtime):
@@ -71,16 +72,29 @@ def eligible(entry: dict, hints: Hints) -> bool:
     return True
 
 
-def choose(cache: dict, hints: Hints, n: int = 5, exclude: set[str] = frozenset(), seed: int | None = None) -> list[str]:
-    """Return up to n slugs: well rated, varied in genre, and not repeated from recent sessions.
+TASTE_JITTER = 5.0  # taste scores run 0 to ~17; this keeps the top 30 or so in rotation
 
-    Ranking is the Letterboxd rating plus a little randomness, so the same
-    top-rated films don't come back every night. At most two picks share a
-    first genre.
+
+def choose(cache: dict, hints: Hints, n: int = 5, exclude: set[str] = frozenset(), seed: int | None = None,
+           taste: dict | None = None, wildcard: bool = False) -> list[str]:
+    """Return up to n slugs: a good fit, varied in genre, and not repeated from recent sessions.
+
+    With a taste profile, ranking is its score plus some randomness, so the
+    same best fits don't come back every night. Without one, it's the
+    Letterboxd rating. At most two picks share a first genre.
     """
     rng = random.Random(seed)
-    pool = [(slug, e) for slug, e in cache.items() if slug not in exclude and eligible(e, hints)]
-    scored = sorted(pool, key=lambda se: (se[1].get("letterboxd_rating") or 3.0) + rng.uniform(0, 0.6), reverse=True)
+    pool = [(slug, e) for slug, e in cache.items() if slug not in exclude and eligible(e, hints, wildcard)]
+
+    def key(se):
+        slug, e = se
+        if wildcard:
+            return e.get("score", 0) + rng.uniform(0, TASTE_JITTER)
+        if taste and slug in taste:
+            return taste[slug][0] + rng.uniform(0, TASTE_JITTER)
+        return (e.get("letterboxd_rating") or 3.0) + rng.uniform(0, 0.6)
+
+    scored = sorted(pool, key=key, reverse=True)
     picks, per_genre = [], {}
     for slug, e in scored:
         g = (e.get("genres") or ["?"])[0]
@@ -93,11 +107,22 @@ def choose(cache: dict, hints: Hints, n: int = 5, exclude: set[str] = frozenset(
     return picks
 
 
+WILDCARDS = 2
+
+
 @dataclass
 class Plan:
     slugs: list[str]
     reasons: dict[str, str]
     note: str | None = None  # one line for the intro, e.g. "Spy films" or "Like The Wicker Man (1973)"
+    wildcards: list[str] = field(default_factory=list)  # slugs in `slugs` that are off the watchlist
+
+    def summary(self) -> str:
+        n_list = len(self.slugs) - len(self.wildcards)
+        s = f"{n_list} picks from the watchlist"
+        if self.wildcards:
+            s += f" and {len(self.wildcards)} wildcard{'s' if len(self.wildcards) > 1 else ''} 🃏"
+        return s
 
 
 def _rating_line(e: dict) -> str | None:
@@ -106,12 +131,15 @@ def _rating_line(e: dict) -> str | None:
 
 
 def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | None = None,
-         lookup=None, n: int = 5) -> Plan:
+         lookup=None, n: int = 5, taste: dict | None = None) -> Plan:
     """Turn a kickoff message into picks: plain, topic search, or "more like X".
 
     `lookup(title, year)` resolves a title on TMDB (tmdb.search); injected so
-    tests don't hit the network.
+    tests don't hit the network. `taste` is data/taste.json (movie_night.taste):
+    watchlist scores and reasons, plus wildcards, which `cache` must already
+    include as entries with "wildcard": true.
     """
+    scores = (taste or {}).get("scores") or {}
     from . import search
 
     hints = parse_hints(text)
@@ -150,15 +178,24 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
                 matched = search.matches_topics(e, topics)
                 if matched:
                     included = bool((e.get("availability") or {}).get("included"))
-                    hits.append((included, len(matched), (e.get("letterboxd_rating") or 3.0) + rng.uniform(0, 0.6),
-                                 slug, matched))
+                    fit = scores[slug][0] + rng.uniform(0, TASTE_JITTER) if slug in scores else \
+                        (e.get("letterboxd_rating") or 3.0) + rng.uniform(0, 0.6)
+                    hits.append((included, len(matched), fit, slug, matched))
             hits.sort(reverse=True)
             top = hits[:n]
             reasons = {t[3]: " · ".join(x for x in (", ".join(t[4]).capitalize(), _rating_line(cache[t[3]])) if x)
                        for t in top}
             return Plan([t[3] for t in top], reasons, " / ".join(t.capitalize() for t in topics))
-        slugs = choose(cache, h, n=n, exclude=exclude, seed=seed)
-        return Plan(slugs, {s: _rating_line(cache[s]) for s in slugs if _rating_line(cache[s])})
+        wild = choose(cache, h, n=WILDCARDS, exclude=exclude, seed=seed, wildcard=True) if taste else []
+        slugs = choose(cache, h, n=n - len(wild), exclude=exclude, seed=seed, taste=scores)
+        reasons = {}
+        for s in slugs:
+            line = " · ".join(x for x in ((scores.get(s) or [None, None])[1], _rating_line(cache[s])) if x)
+            if line:
+                reasons[s] = line
+        for s in wild:
+            reasons[s] = "🃏 Wildcard, not on the watchlist" + (f" · {cache[s]['reason']}" if cache[s].get("reason") else "")
+        return Plan(slugs + wild, reasons, wildcards=wild)
 
     result = run(hints)
     if len(result.slugs) < 3 and not hints.allow_rent:

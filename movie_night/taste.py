@@ -41,7 +41,7 @@ LOVED_STARS = 4.0
 GENRE_WEIGHT = 1.5
 REC_WEIGHT = 1.0
 REC_CAP = 3
-WILDCARD_LOOKUPS = 80  # TMDB detail calls per run for wildcard candidates
+WILDCARD_LOOKUPS = 250  # TMDB detail calls for wildcard candidates (each cached after the first run)
 WILDCARD_MIN_VOTES = 300
 WILDCARD_MIN_AVERAGE = 6.8
 
@@ -126,7 +126,7 @@ def loved(e: dict) -> bool:
 
 
 def _details(tmdb_id: int) -> dict:
-    d = tmdb._get(f"/movie/{tmdb_id}", append_to_response="keywords,recommendations,watch/providers")
+    d = tmdb._get(f"/movie/{tmdb_id}", append_to_response="keywords,recommendations,watch/providers,videos")
     return {
         "tmdb_id": d["id"],
         "title": d.get("title"),
@@ -138,6 +138,7 @@ def _details(tmdb_id: int) -> dict:
         "vote_average": d.get("vote_average"),
         "vote_count": d.get("vote_count"),
         "overview": d.get("overview") or "",
+        "trailer_url": tmdb.pick_trailer((d.get("videos") or {}).get("results", [])),
         "availability": asdict(tmdb.parse_availability(((d.get("watch/providers") or {}).get("results") or {}).get("US"))),
     }
 
@@ -320,6 +321,58 @@ def report(cache: dict, p: Profile, ranked: list[Scored], wild: list[Scored], st
         lines.append(f"| {i} | {e['title']} ({e.get('year')}) | {_where(e)} | {e['vote_average']:.1f} | "
                      f"{s.score:.1f} | {s.reason} |")
     return "\n".join(lines) + "\n"
+
+
+def short_reason(r: str) -> str:
+    """The pick-message version: just the loved films, not the shared tags."""
+    return r.split("; ")[0]
+
+
+def build(username: str, data: Path, export: Path | None = None, refresh: bool = True, log=print,
+          keep_wild: int = 30) -> dict:
+    """Refresh ratings and write data/taste.json, which Delo reads at kickoff."""
+    import datetime as dt
+
+    rated_path, wild_path = data / "rated.json", data / "wildcards.json"
+    store = json.loads(rated_path.read_text()) if rated_path.exists() else {}
+    if refresh:
+        refresh_rated(username, store, log, export=export)
+        rated_path.write_text(json.dumps(store, indent=1, ensure_ascii=False))
+    cache = json.loads((data / "films.json").read_text())
+    p = build_profile(store)
+    wstore = json.loads(wild_path.read_text()) if wild_path.exists() else {}
+    wild = wildcards(cache, p, wstore, log=log)[:keep_wild]
+    today = dt.date.today().isoformat()
+    for w in wild:  # availability changes; the rest of a film's details don't
+        e = wstore[w.slug]
+        if e.get("availability_checked") != today:
+            try:
+                us = tmdb._get(f"/movie/{e['tmdb_id']}/watch/providers").get("results", {}).get("US")
+                e["availability"], e["availability_checked"] = asdict(tmdb.parse_availability(us)), today
+            except urllib.error.URLError as err:
+                log(f"  availability failed for wildcard {e['title']}: {err}")
+            time.sleep(0.05)
+    wild_path.write_text(json.dumps(wstore, indent=1, ensure_ascii=False))
+    out = {
+        "built": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "rated": len(store),
+        "scores": {s.slug: [round(s.score, 2), short_reason(s.reason)] for s in rank(cache, p)},
+        "wildcards": {f"tmdb-{w.slug}": {**{k: wstore[w.slug].get(k) for k in (
+            "tmdb_id", "title", "year", "runtime_min", "genres", "availability", "trailer_url")},
+            "wildcard": True, "on_watchlist": False, "score": round(w.score, 2), "reason": short_reason(w.reason)}
+            for w in wild},
+    }
+    (data / "taste.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    log(f"taste: profile from {len(store)} films, {len(out['scores'])} watchlist scores, {len(wild)} wildcards")
+    return out
+
+
+def load(data: Path) -> dict | None:
+    path = data / "taste.json"
+    try:
+        return json.loads(path.read_text()) if path.exists() else None
+    except json.JSONDecodeError:
+        return None
 
 
 def main(argv=None):

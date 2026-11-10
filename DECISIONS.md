@@ -2,6 +2,10 @@
 
 Newest first. Each entry says what was decided and why.
 
+## 2026-11-10: Picks are rich, standard iMessage messages
+
+Each pick is a short text (title and year, then runtime, genres and where to watch, then one line on why) followed by its trailer as a standalone link, which iMessage turns into a preview card. A link inside the text gets no preview (seen live in M0). Chuck wants this richer, standard format, and will revisit once real multi-pick sessions run. A veto counts as a 👎 tapback or a 🚫 emoji.
+
 ## 2026-11-09: The vote is code, not the LLM
 
 The LLM writes messages and reads hints. Winners come from `movie_night/rules.py`. Every result is then explainable ("Bravo won 2+2 over Alpha's 3+1"), replayable from the log, and testable.

@@ -27,6 +27,7 @@ CACHE = {
                  "keywords": ["serial killer", "detective", "rural"], "genres": ["Crime", "Thriller"]},
     "musical": {"title": "Some Musical", "on_watchlist": True, "tmdb_id": 12,
                 "keywords": ["musical"], "genres": ["Music", "Comedy"]},
+    "seen": {"title": "Se7en", "on_watchlist": True, "tmdb_id": 2, "keywords": ["serial killer"], "genres": ["Crime"]},
     "off": {"title": "Off list", "on_watchlist": False, "tmdb_id": 99, "keywords": [], "genres": []},
 }
 
@@ -49,7 +50,7 @@ class Profile(unittest.TestCase):
     def test_rank_prefers_what_you_love(self):
         p = build_profile(RATED)
         ranked = rank(CACHE, p)
-        self.assertEqual([s.slug for s in ranked], ["memories", "musical"])  # off-list film left out
+        self.assertEqual([s.slug for s in ranked], ["memories", "musical"])  # off-list and already-rated films left out
         self.assertEqual(ranked[0].parts["recommended_by"], ["zodiac", "seven"])
         self.assertLess(ranked[1].score, 0)  # Cats was 1 star; its recommendation doesn't count
 

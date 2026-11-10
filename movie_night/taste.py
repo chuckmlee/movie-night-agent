@@ -210,7 +210,10 @@ def build_profile(rated: dict) -> Profile:
         if loved(e):
             for rid in e.get("rec_ids") or []:
                 p.recommended_by.setdefault(rid, []).append(e["slug"])
-    p.keywords = dict(kw)
+    # Scale so the strongest keyword is 10: keeps keyword, genre and
+    # recommendation terms comparable whether there are 70 ratings or 700.
+    top = max((abs(v) for v in kw.values()), default=1.0) or 1.0
+    p.keywords = {k: 10 * v / top for k, v in kw.items()}
     p.genres = {g: gw[g] / gcount[g] for g in gw}  # mean weight: how the household rates the genre
     return p
 
@@ -255,10 +258,11 @@ def reason(entry: dict, p: Profile, parts: dict) -> str:
 
 
 def rank(cache: dict, p: Profile) -> list[Scored]:
+    seen = {e.get("tmdb_id") for e in p.rated.values() if e.get("tmdb_id")}
     out = []
     for slug, e in cache.items():
-        if not e.get("on_watchlist") or not e.get("tmdb_id"):
-            continue
+        if not e.get("on_watchlist") or not e.get("tmdb_id") or e["tmdb_id"] in seen:
+            continue  # already watched (e.g. saved for a rewatch): not a pick
         s, parts = score(e, p)
         out.append(Scored(slug, s, reason(e, p, parts), parts))
     return sorted(out, key=lambda x: -x.score)

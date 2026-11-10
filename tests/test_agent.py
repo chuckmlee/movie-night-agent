@@ -178,6 +178,32 @@ class Flow(unittest.TestCase):
         self.poll(now=1)
         self.assertEqual(self.poll(now=100), "tally: alpha")
 
+    def test_new_ask_replaces_unfinished_session(self):
+        # Nov 10: a session nobody voted on swallowed three later asks.
+        self.linq.human(A, "movie night?")
+        self.poll()
+        first = self.state.active["kickoff_id"]
+        self.linq.react(pick_msg(self.linq, self.state, self.state.active["films"][0]), A, "🥇")
+        self.linq.human(A, "Delo movie night, something funny")
+        self.assertTrue(self.poll().startswith("kickoff"))
+        self.assertNotEqual(self.state.active["kickoff_id"], first)
+        self.assertEqual(self.history, [])
+
+    def test_delo_tally_is_not_a_new_ask(self):
+        self.linq.human(A, "movie")
+        self.poll()
+        self.linq.react(pick_msg(self.linq, self.state, "bravo"), A, "🥇")
+        self.linq.human(B, "Delo, tally")
+        self.assertEqual(self.poll(), "tally: bravo")
+
+    def test_as_good_as_phrasing(self):
+        from movie_night.agent import _is_kickoff
+        from movie_night.search import find_like
+        t = "Delo find some watch ideas that are as good as Memories of a Murder "
+        self.assertTrue(_is_kickoff(t))
+        self.assertEqual(find_like(t), ("Memories of a Murder", None))
+        self.assertTrue(_is_kickoff("Movies like Memories of a Murder"))
+
 
 if __name__ == "__main__":
     unittest.main()

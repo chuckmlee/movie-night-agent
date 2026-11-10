@@ -8,8 +8,10 @@ not a live check.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
+import re
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -123,6 +125,27 @@ def keywords(tmdb_id: int) -> list[str]:
     return [k["name"] for k in _get(f"/movie/{tmdb_id}/keywords").get("keywords", [])]
 
 
+def _norm(title: str) -> str:
+    words = re.sub(r"[^\w\s]", " ", title.lower()).split()
+    return " ".join(w for w in words if w not in {"a", "an", "the"})
+
+
+def best_match(title: str, results: list[dict]) -> dict:
+    """The film someone meant. TMDB's own order isn't enough: for "Memories of a
+    Murder" it ranks an obscure 2005 film with 0 votes above Memories of Murder
+    (Nov 10). Prefer a title match ignoring articles and punctuation, then a
+    close title, then the most-voted."""
+    want = _norm(title)
+
+    def rank(r):
+        got = _norm(r.get("title") or "")
+        orig = _norm(r.get("original_title") or "")
+        close = max(difflib.SequenceMatcher(None, want, got).ratio(), difflib.SequenceMatcher(None, want, orig).ratio())
+        return (want in (got, orig), close >= 0.85, r.get("vote_count") or 0)
+
+    return max(results, key=rank)
+
+
 def search(title: str, year: int | None = None) -> dict | None:
     """Best TMDB match for a title someone typed, with keywords, genres and recommendations."""
     params = {"query": title}
@@ -131,9 +154,7 @@ def search(title: str, year: int | None = None) -> dict | None:
     results = _get("/search/movie", **params).get("results", [])
     if not results:
         return None
-    # Prefer an exact title match, then popularity (TMDB's own order).
-    exact = [r for r in results if r.get("title", "").lower() == title.lower()]
-    best = (exact or results)[0]
+    best = best_match(title, results)
     d = _get(f"/movie/{best['id']}", append_to_response="keywords,recommendations,similar")
     return {
         "tmdb_id": d["id"],

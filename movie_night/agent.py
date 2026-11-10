@@ -42,7 +42,18 @@ KICKOFF_RE = re.compile(
     re.I)
 # "something a lot like The Wicker Man", "any movies similar to Heat": a request
 # even without "movie night", as long as the title resolves on TMDB.
-LIKE_KICKOFF_RE = re.compile(r"\b(something|anything|movies?|films?)\b[^.?!]*\b(like|similar to)\b", re.I)
+LIKE_KICKOFF_RE = re.compile(r"\b(something|anything|movies?|films?|ideas?)\b[^.?!]*\b(like|similar to|as good as)\b", re.I)
+def _bare(text: str) -> str:
+    """The message without a leading "hey Delo," so commands still match."""
+    return re.sub(r"^\s*(hey\s+|ok\s+)?delo\b[\s,:]*", "", text, flags=re.I)
+
+
+def _is_kickoff(text: str) -> bool:
+    if TALLY_RE.search(_bare(text)):  # "delo, tally" counts votes; it isn't a new ask
+        return False
+    return bool(KICKOFF_RE.search(text) or LIKE_KICKOFF_RE.search(text))
+
+
 TALLY_RE = re.compile(r"^\s*(tally|done|count|results?|pick it|decide)\b", re.I)
 RECENT_SESSIONS_EXCLUDED = 3
 
@@ -212,16 +223,21 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         if m["id"] not in state.seen:
             state.seen.append(m["id"])
 
-    if state.active is None:
-        kick = next((m for m in reversed(new)
-                     if KICKOFF_RE.search(_text(m)) or LIKE_KICKOFF_RE.search(_text(m))), None)
-        if not kick:
-            return None
+    kick = next((m for m in reversed(new) if _is_kickoff(_text(m))), None)
+    p = None
+    if kick:
         text = _text(kick)
         recent = {s for h in history[-RECENT_SESSIONS_EXCLUDED:] for s in h.get("films", [])}
         p = plan(text, cache, exclude=recent, seed=seed, lookup=lookup)
         if not KICKOFF_RE.search(text) and (p.note or "").startswith("I couldn't find"):
-            return None  # "something like that" in passing; not a request
+            p = None  # "something like that" in passing; not a request
+    if p is not None and state.active is not None:
+        # A fresh ask replaces a session nobody finished, instead of being
+        # ignored until someone types "tally" (Nov 10: three asks went unanswered).
+        state.active = None
+    if state.active is None:
+        if p is None:
+            return None
         slugs = p.slugs
         if not slugs:
             linq.say(chat_id, "I couldn't find anything on the watchlist that fits. Try fewer limits?")
@@ -242,7 +258,7 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         return f"kickoff: sent {len(slugs)} picks"
 
     session = build_session(state.active, cache, msgs, people, history_for(history))
-    asked = any(TALLY_RE.search(_text(m)) for m in new)
+    asked = any(TALLY_RE.search(_bare(_text(m))) for m in new)
     now = time.time() if now is None else now
     if not (asked or ready_to_tally(session, state.active, now)):
         return None

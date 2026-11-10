@@ -37,10 +37,10 @@ from .rules import Film, History, Reaction, ReactionEvent, Session
 LINQ = "https://api.linqapp.com/api/partner/v3"
 DATA = Path("data")
 # Deliberately narrow, so "great movie!" after a session doesn't start another one.
-KICKOFF_RE = re.compile(
-    r"\bmovie\s+(night|tonight|time)\b|\bmovies?\s*\?|\bpick\s+(us\s+)?a\s+movie\b|^\s*movie\s*$|🎬"
-    r"|^\s*(hey\s+|ok\s+)?delo\b",  # talking to Delo by name
-    re.I)
+ASK_RE = re.compile(
+    r"\bmovie\s+(night|tonight|time)\b|\bmovies?\s*\?|\bpick\s+(us\s+)?a\s+movie\b|^\s*movie\s*$|🎬", re.I)
+NAMED_RE = re.compile(r"^\s*(hey\s+|ok\s+)?delo\b", re.I)  # talking to Delo by name
+KICKOFF_RE = re.compile(ASK_RE.pattern + "|" + NAMED_RE.pattern, re.I)
 # "something a lot like The Wicker Man", "any movies similar to Heat": a request
 # even without "movie night", as long as the title resolves on TMDB.
 LIKE_KICKOFF_RE = re.compile(r"\b(something|anything|movies?|films?|ideas?)\b[^.?!]*\b(like|similar to|as good as)\b", re.I)
@@ -53,6 +53,25 @@ def _is_kickoff(text: str) -> bool:
     if TALLY_RE.search(_bare(text)):  # "delo, tally" counts votes; it isn't a new ask
         return False
     return bool(KICKOFF_RE.search(text) or LIKE_KICKOFF_RE.search(text))
+
+
+# While picks are open, "limit to Catholic themes", "shorter", "less bleak" narrow
+# the last ask instead of being ignored (Nov 10). Only openers that read as an
+# instruction count, so chat between the two of them doesn't reshuffle picks.
+REFINE_RE = re.compile(
+    r"^\s*(limit|only|narrow|stick to|keep it|make it|same but|but|more|less|without|no|nothing|"
+    r"shorter|longer|lighter|darker|funnier|newer|older|instead|rather|what about|how about|prefer|focus)\b",
+    re.I)
+
+
+def _is_refinement(text: str) -> bool:
+    if TALLY_RE.search(_bare(text)):
+        return False
+    if REFINE_RE.search(_bare(text)):
+        return True
+    # "Delo, Catholic themes only": addressed by name, with a narrowing word, and not a new ask.
+    return bool(NAMED_RE.search(text) and not ASK_RE.search(text) and not LIKE_KICKOFF_RE.search(text)
+                and re.search(r"\b(only|limit|narrow|stick to|instead)\b", text, re.I))
 
 
 TALLY_RE = re.compile(r"^\s*(tally|done|count|results?|pick it|decide)\b", re.I)
@@ -263,14 +282,25 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         if m["id"] not in state.seen:
             state.seen.append(m["id"])
 
-    kick = next((m for m in reversed(new) if _is_kickoff(_text(m))), None)
+    prev_ask = (state.active or {}).get("ask")
+    kick, refine = None, False
+    for m in reversed(new):
+        if prev_ask and _is_refinement(_text(m)):
+            kick, refine = m, True
+            break
+        if _is_kickoff(_text(m)):
+            kick = m
+            break
     p = None
     if kick:
-        text = _text(kick)
+        text = f"{prev_ask}\nFollow-up: {_bare(_text(kick))}" if refine else _text(kick)
         recent = {s for h in history[-RECENT_SESSIONS_EXCLUDED:] for s in h.get("films", [])}
-        p = plan(text, cache, exclude=recent, seed=seed, lookup=lookup, taste=taste, ask=ask)
-        if not KICKOFF_RE.search(text) and (p.note or "").startswith("I couldn't find"):
+        p = plan(text, cache, exclude=recent, seed=seed, lookup=lookup, taste=taste, ask=ask, refine=refine)
+        if not refine and not KICKOFF_RE.search(text) and (p.note or "").startswith("I couldn't find"):
             p = None  # "something like that" in passing; not a request
+    if refine and not p.slugs:  # keep the picks they have rather than dropping them
+        linq.say(chat_id, "Nothing from the shortlist fits that too. The picks above still stand.")
+        return "refine: nothing fit"
     if p is not None and state.active is not None:
         # A fresh ask replaces a session nobody finished, instead of being
         # ignored until someone types "tally" (Nov 10: three asks went unanswered).
@@ -297,7 +327,7 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
             body = linq_format.pick_message(
                 linq_format.pick_from_cache(cache[slug], p.reasons.get(slug), marks.get(slug), label))
             msg_to_slug[linq.send(chat_id, body)] = slug
-        state.active = {"kickoff_id": kick["id"], "films": slugs, "msg_to_slug": msg_to_slug,
+        state.active = {"kickoff_id": kick["id"], "ask": text, "films": slugs, "msg_to_slug": msg_to_slug,
                         "entries": {s: cache[s] for s in p.wildcards},
                         "started": dt.datetime.now(dt.timezone.utc).isoformat()}
         return f"kickoff: sent {len(slugs)} picks"

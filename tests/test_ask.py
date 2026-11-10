@@ -66,6 +66,17 @@ class ClaudeChooses(unittest.TestCase):
         self.assertTrue(p.note.startswith("More like The Devils"))
         self.assertIn("mother-joan", p.slugs)
 
+    def test_like_title_stops_at_the_qualifier(self):
+        from movie_night.search import find_like
+        self.assertEqual(find_like(ASK), ("The Devils", None))
+
+    def test_follow_up_goes_to_claude_without_a_tone_word(self):
+        client = FakeClient([("silence", "Faith under pressure")])
+        p = plan(ASK + "\nFollow-up: limit to catholic themes", CACHE, lookup=lambda t, y: DEVILS,
+                 ask=Asker(client, log=lambda m: None), refine=True)
+        self.assertEqual(p.slugs, ["silence"])
+        self.assertIn("Follow-up: limit to catholic themes", client.prompts[0])
+
     def test_plain_ask_never_calls_claude(self):
         client = FakeClient([("heat", "x")])
         plan("movie night?", CACHE, ask=Asker(client, log=lambda m: None))

@@ -64,14 +64,15 @@ Here are the films they could watch: their own watchlist, plus a few wildcards t
 </candidates>
 
 Choose the {n} candidates that best answer the ask, best first. Read the ask closely: if it says
-"like X but less Y", a film that is just like X with even more Y is a bad pick. Prefer watchlist
+"like X but less Y", a film that is just like X with even more Y is a bad pick. If it has
+follow-ups, they narrow or change the first ask, and the latest wins where they conflict. Prefer watchlist
 films when two fit about equally. Use only ids from the list.
 
 For each pick write `why`: one short line (at most 15 words) on how it answers the ask, in plain
 words a friend would use. Ground it in the synopsis and tags given; don't claim things they don't
 support, and don't give away twists or endings.
 
-Also write `note`: the ask restated in at most 8 words, like "Like The Devils, less shocking"."""
+Also write `note`: the whole ask, follow-ups included, restated in at most 8 words, like "Like The Devils, less shocking"."""
 
 
 def _line(slug: str, e: dict) -> str:

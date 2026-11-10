@@ -71,6 +71,8 @@ def find_like(text: str) -> tuple[str, int | None] | None:
     for m in LIKE_RE.finditer(text):
         title = m.group("title").strip()
         title = re.sub(r"^(?:the movie|the film)\s+", "", title, flags=re.I)
+        # "like The Devils but less shocking": the title ends where the qualifier starts.
+        title = re.split(r"\s+(?:but|though|yet|except|only|minus|without|less)\b", title, flags=re.I)[0]
         if re.search(r"\b(?:like|similar to)\b", title, re.I):  # "like something like X"
             return find_like(title + (f" ({m.group('year')})" if m.group("year") else ""))
         if title.lower() in NOT_TITLES or len(title) < 2:

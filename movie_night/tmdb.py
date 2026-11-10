@@ -168,6 +168,7 @@ def search(title: str, year: int | None = None) -> dict | None:
         "year": int(d["release_date"][:4]) if d.get("release_date") else None,
         "genres": [g["name"] for g in d.get("genres", [])],
         "keywords": [k["name"] for k in (d.get("keywords") or {}).get("keywords", [])],
+        "overview": d.get("overview") or "",
         "related_ids": [r["id"] for r in (d.get("recommendations") or {}).get("results", [])]
         + [r["id"] for r in (d.get("similar") or {}).get("results", [])],
     }

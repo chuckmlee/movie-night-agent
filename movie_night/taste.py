@@ -381,7 +381,8 @@ def build(username: str, data: Path, export: Path | None = None, refresh: bool =
         "rated": len(store),
         "scores": {s.slug: [round(s.score, 2), pick_reason(s, cache[s.slug], p)] for s in rank(cache, p)},
         "wildcards": {f"tmdb-{w.slug}": {**{k: wstore[w.slug].get(k) for k in (
-            "tmdb_id", "title", "year", "runtime_min", "genres", "availability", "trailer_url")},
+            "tmdb_id", "title", "year", "runtime_min", "genres", "availability", "trailer_url",
+            "poster_path", "keywords", "overview")},
             "wildcard": True, "on_watchlist": False, "score": round(w.score, 2),
             "reason": pick_reason(w, wstore[w.slug], p)}
             for w in wild},

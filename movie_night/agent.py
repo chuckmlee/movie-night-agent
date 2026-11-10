@@ -9,7 +9,8 @@ Flow, per DECISIONS.md:
 2. It reads hints from that message, picks 4-5 films from the synced watchlist,
    and sends each as a text followed by its trailer link.
 3. People react 🥇 🥈 🥉 and veto with 🚫 or 👎. The tally is code (rules.py).
-4. When everyone has given a 🥇, or someone texts "tally" / "done", it announces
+4. When everyone has placed 🥇🥈🥉 (or has a 🥇 and stops changing reactions for
+   90 seconds), or someone texts "tally" / "done", it announces
    the winner and why. It records vetoes and top picks for next time.
 
 State lives in data/ (git-ignored): agent-state.json and history.json.
@@ -150,12 +151,35 @@ def reason_for(entry: dict) -> str | None:
     return f"★ {r:.1f} on Letterboxd" if r else None
 
 
+MEDALS = (Reaction.GOLD, Reaction.SILVER, Reaction.BRONZE)
+SETTLE_SECONDS = 90
+
+
 def everyone_gave_gold(session: Session) -> bool:
     return all(Reaction.GOLD in session.state[p] for p in session.people)
 
 
+def everyone_done(session: Session) -> bool:
+    """Everyone has placed every medal they can (fewer films than medals is fine)."""
+    need = min(len(MEDALS), len(session.films))
+    return all(sum(r in session.state[p] for r in MEDALS) >= need for p in session.people)
+
+
+def ready_to_tally(session: Session, active: dict, now: float) -> bool:
+    """Tally once everyone has used all three medals, or once everyone has a 🥇
+    and nobody has changed a reaction for SETTLE_SECONDS. People often tap 🥇
+    first and the 🥈/🥉 a moment later (second live session, Nov 10)."""
+    if everyone_done(session):
+        return True
+    sig = json.dumps({p: {r.value: f for r, f in sorted(m.items())} for p, m in session.state.items()}, sort_keys=True)
+    if sig != active.get("sig"):
+        active["sig"], active["sig_since"] = sig, now
+        return False
+    return everyone_gave_gold(session) and now - active.get("sig_since", now) >= SETTLE_SECONDS
+
+
 def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict],
-         names: dict[str, str] | None = None, seed: int | None = None) -> str | None:
+         names: dict[str, str] | None = None, seed: int | None = None, now: float | None = None) -> str | None:
     """One poll. Returns what happened, for logging."""
     names = names or {}
     msgs = linq.messages(chat_id)
@@ -196,7 +220,8 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
 
     session = build_session(state.active, cache, msgs, people, history_for(history))
     asked = any(TALLY_RE.search(_text(m)) for m in new)
-    if not (asked or everyone_gave_gold(session)):
+    now = time.time() if now is None else now
+    if not (asked or ready_to_tally(session, state.active, now)):
         return None
     result = session.tally()
     linq.say(chat_id, explain(result, cache, names))

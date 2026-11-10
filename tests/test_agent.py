@@ -83,8 +83,8 @@ class Flow(unittest.TestCase):
         self.linq, self.state, self.history = FakeLinq(), State(), []
         self.linq.human(A, "hey")  # B never texts, only reacts
 
-    def poll(self):
-        return step(self.linq, "chat", self.state, CACHE, self.history, seed=0)
+    def poll(self, now=0.0):
+        return step(self.linq, "chat", self.state, CACHE, self.history, seed=0, now=now)
 
     def test_quiet_until_kickoff(self):
         self.assertIsNone(self.poll())
@@ -100,7 +100,9 @@ class Flow(unittest.TestCase):
         self.linq.react(pick_msg(self.linq, st, "bravo"), A, "🥈")
         self.linq.react(pick_msg(self.linq, st, "bravo"), B, "🥇")
         self.linq.react(pick_msg(self.linq, st, "alpha"), B, tapback="dislike")
-        self.assertEqual(self.poll(), "tally: bravo")  # everyone gave gold; Alpha vetoed
+        self.assertIsNone(self.poll(now=10))  # golds in, but people may still add 🥈/🥉
+        self.assertIsNone(self.poll(now=60))
+        self.assertEqual(self.poll(now=200), "tally: bravo")  # settled; Alpha vetoed
         self.assertIn("🏆 Tonight: Bravo", self.linq.sent[-1])
         self.assertIn("Vetoed: Alpha", self.linq.sent[-1])
         self.assertEqual(self.history[-1]["vetoed_by"], [B])
@@ -127,7 +129,29 @@ class Flow(unittest.TestCase):
         self.linq.react(pick_msg(self.linq, self.state, "alpha"), A, "🥇")
         self.assertIsNone(self.poll())  # B is in the chat and hasn't voted
         self.linq.react(pick_msg(self.linq, self.state, "bravo"), B, "🥇")
-        self.assertTrue(self.poll().startswith("tally"))
+        self.poll(now=1)
+        self.assertTrue(self.poll(now=100).startswith("tally"))
+
+    def test_silver_after_gold_counts(self):
+        # Replays the second live session: B's 🥈 lands after both 🥇s.
+        self.linq.human(A, "movie night?")
+        self.poll()
+        f = self.state.active["films"]
+        self.linq.react(pick_msg(self.linq, self.state, f[0]), B, "🥇")
+        self.linq.react(pick_msg(self.linq, self.state, f[1]), A, "🥇")
+        self.assertIsNone(self.poll(now=5))
+        self.linq.react(pick_msg(self.linq, self.state, f[1]), B, "🥈")
+        self.assertIsNone(self.poll(now=40))
+        self.assertEqual(self.poll(now=200), f"tally: {f[1]}")  # 3+2 beats 3+0
+
+    def test_all_medals_placed_tallies_at_once(self):
+        self.linq.human(A, "movie night?")
+        self.poll()
+        f = self.state.active["films"]
+        for who in (A, B):
+            for film_slug, e in zip(f, ["🥇", "🥈", "🥉"]):
+                self.linq.react(pick_msg(self.linq, self.state, film_slug), who, e)
+        self.assertEqual(self.poll(now=1), f"tally: {f[0]}")
 
     def test_tally_on_request(self):
         self.linq.human(A, "movie")
@@ -143,7 +167,8 @@ class Flow(unittest.TestCase):
         trailer = [mid for mid, s in self.state.active["msg_to_slug"].items() if s == "alpha"][-1]
         self.linq.react(trailer, A, "🥇")
         self.linq.react(trailer, B, "🥇")
-        self.assertEqual(self.poll(), "tally: alpha")
+        self.poll(now=1)
+        self.assertEqual(self.poll(now=100), "tally: alpha")
 
 
 if __name__ == "__main__":

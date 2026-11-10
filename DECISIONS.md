@@ -69,3 +69,11 @@ Every pick used to open with 🎬, which told you nothing. Now Claude chooses on
 ## 2026-11-10: Claude chooses picks for asks with nuance; code still builds the shortlist
 
 "Like The Devils but less shocking, as intellectually rich" needs judgment that keyword overlap can't supply. When an ask carries comparisons or tone words (`ask.is_nuanced`), code builds a shortlist of 50 eligible films: the closest keyword matches to any named film first, then the household's best-scored films, with about a fifth of them wildcards. Claude Opus 5.5, at low effort, chooses up to 5 from that list and gives each a one-line reason grounded in the synopsis and tags. Ids outside the shortlist are dropped. Streaming filters, exclusions and the watchlist/wildcard labels stay in code. Plain asks never reach Claude. With no key, or a failed or refused call, the keyword matcher answers as before. Each ask costs about 2–4¢.
+
+## Follow-ups narrow the last ask (Nov 10)
+
+While picks are open, a message that opens like an instruction ("limit to Catholic themes", "shorter",
+"less bleak", "no horror"), or one addressed to Delo with "only"/"limit"/"instead", is joined to the
+last ask as a "Follow-up:" line and sent to Claude, even without a tone word. The new picks replace the
+open ones. Other chat between the two of them is still ignored, and with no picks open a follow-up is
+ignored too. "Like X but less Y" now reads the title as X alone, so the TMDB lookup finds X.

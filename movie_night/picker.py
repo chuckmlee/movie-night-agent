@@ -157,13 +157,15 @@ def ask_pool(cache: dict, h: Hints, exclude: set[str], scores: dict, seed_film: 
 
 
 def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | None = None,
-         lookup=None, n: int = 5, taste: dict | None = None, ask=None) -> Plan:
+         lookup=None, n: int = 5, taste: dict | None = None, ask=None, refine: bool = False) -> Plan:
     """Turn a kickoff message into picks: plain, topic search, or "more like X".
 
     `lookup(title, year)` resolves a title on TMDB (tmdb.search); injected so
     tests don't hit the network. `taste` is data/taste.json (movie_night.taste):
     watchlist scores and reasons, plus wildcards, which `cache` must already
-    include as entries with "wildcard": true.
+    include as entries with "wildcard": true. `refine` marks a follow-up
+    ("limit to Catholic themes") folded into the last ask; it goes to Claude
+    even without a tone word.
     """
     scores = (taste or {}).get("scores") or {}
     from . import search
@@ -177,7 +179,7 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
     if ask is not None:
         from .ask import is_nuanced
 
-        if is_nuanced(text):
+        if refine or is_nuanced(text):
             got = ask(text, ask_pool(cache, hints, exclude, scores, seed_film, vocab), seed_film)
             if got:
                 note, chosen = got

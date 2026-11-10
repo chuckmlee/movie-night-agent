@@ -225,6 +225,35 @@ class Flow(unittest.TestCase):
         self.assertNotEqual(self.state.active["kickoff_id"], first)
         self.assertEqual(self.history, [])
 
+    def test_follow_up_narrows_the_last_ask(self):
+        # Nov 10: "limit choices to very catholic themes" after a Devils ask got no answer.
+        asks = []
+
+        def ask(text, pool, seed):
+            asks.append(text)
+            return "Catholic, like The Devils", [("alpha", "why"), ("bravo", "why")]
+
+        def poll():
+            return step(self.linq, "chat", self.state, CACHE, self.history, seed=0, now=0,
+                        posters=lambda i: None, ask=ask)
+
+        self.linq.human(A, "Delo, something like Alpha but less shocking, as intellectually rich")
+        poll()
+        self.linq.human(B, "that one looks good lol")
+        self.assertIsNone(poll())  # chat between them is left alone
+        self.linq.human(A, "limit choices to very catholic themes")
+        self.assertTrue(poll().startswith("kickoff"))
+        self.assertEqual(asks[-1], "Delo, something like Alpha but less shocking, as intellectually rich"
+                                   "\nFollow-up: limit choices to very catholic themes")
+        self.linq.human(B, "Delo, shorter")
+        poll()
+        self.assertTrue(asks[-1].endswith("catholic themes\nFollow-up: shorter"))
+        self.assertIn("Catholic, like The Devils", self.linq.sent[-3])
+
+    def test_follow_up_without_open_picks_is_ignored(self):
+        self.linq.human(A, "limit it to comedies")
+        self.assertIsNone(self.poll())
+
     def test_delo_tally_is_not_a_new_ask(self):
         self.linq.human(A, "movie")
         self.poll()

@@ -4,7 +4,7 @@ An agent that lives in a household iMessage group text and turns "what should we
 
 Someone texts the agent ("movie tonight?", "something scary under 2 hours"). It sends 4-5 picks from the watchlist as separate messages, each person reacts with 🥇 🥈 🥉 or 🚫, and deterministic rules pick the winner.
 
-**Status:** early build. M0, the messaging spike, is in progress. See [PLANNING.md](PLANNING.md).
+**Status:** M0-M2 done; two live sessions run in the household chat. Hosting setup is in [docs/hosting.md](docs/hosting.md). See [PLANNING.md](PLANNING.md).
 
 ## What's here
 
@@ -12,6 +12,9 @@ Someone texts the agent ("movie tonight?", "something scary under 2 hours"). It 
 |---|---|
 | `movie_night/rules.py` | The vote rules: medal points, vetoes, no back-to-back vetoes, fairness tie-breaks. Plain code, not the LLM, so every result can be explained and replayed. |
 | `movie_night/watchlist.py` | Reads a public Letterboxd watchlist (politely: one page a second, once a day). |
+| `movie_night/tmdb.py`, `movie_night/sync.py` | Film data: runtime, genres, trailer, where to watch, and the daily sync. |
+| `movie_night/picker.py`, `movie_night/agent.py` | Hints, picks, and the agent loop that runs a session in the chat. |
+| `movie_night/serve.py`, `Dockerfile` | The hosted process: agent, daily sync, and a health check. |
 | `scripts/m0_spike.py` | The Linq group-chat and reaction spike. |
 | `docs/m0-linq-spike.md` | What M0 has to prove, and its results. |
 | `DECISIONS.md` | Why things are the way they are. |

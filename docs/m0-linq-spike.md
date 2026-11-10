@@ -10,7 +10,7 @@ Everything after M0 depends on the answer, so this gate is checked first.
 |---|---|---|
 | API token works | `python3 scripts/m0_spike.py numbers` | Pass, Nov 10 (new key). Line reputation shows AT_RISK |
 | Group chat on the free shared line | `group` with both phones | Pass, Nov 10. Needs `from`; first message can't contain a link |
-| Test pick with trailer link renders | look at both phones | Sent as the second message; preview not yet checked |
+| Test pick with trailer link renders | look at both phones | Pass, Nov 10, only as a standalone `{"type": "link"}` part with a direct YouTube watch URL. A search URL inside a text part showed no preview. Send each pick as text, then its trailer as its own link message |
 | Custom emoji reactions arrive as emoji | `poll`, then webhook | Pass via poll, Nov 10: 🥇 arrives as `type: custom`, `custom_emoji: "🥇"`, with the reactor's handle. Webhook not yet tested |
 | Standard tapbacks arrive (fallback) | ❤️ 👍 ‼️ 👎 on the same message | Pass via poll, Nov 10: 👎 arrives as `type: dislike` |
 | Real monthly price | Linq dashboard or sales | Not checked |

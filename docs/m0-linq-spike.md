@@ -8,11 +8,11 @@ Everything after M0 depends on the answer, so this gate is checked first.
 
 | Check | How | Status |
 |---|---|---|
-| API token works | `python3 scripts/m0_spike.py numbers` | Blocked: token rejected (401, "Invalid or expired token"), Nov 9 |
-| Group chat on the free shared line | `group` with both phones | Not run |
-| Test pick with trailer link renders | look at both phones | Not run |
-| Custom emoji reactions arrive as emoji | `poll`, then webhook | Not run |
-| Standard tapbacks arrive (fallback) | ❤️ 👍 ‼️ 👎 on the same message | Not run |
+| API token works | `python3 scripts/m0_spike.py numbers` | Pass, Nov 10 (new key). Line reputation shows AT_RISK |
+| Group chat on the free shared line | `group` with both phones | Pass, Nov 10. Needs `from`; first message can't contain a link |
+| Test pick with trailer link renders | look at both phones | Sent as the second message; preview not yet checked |
+| Custom emoji reactions arrive as emoji | `poll`, then webhook | Pass via poll, Nov 10: 🥇 arrives as `type: custom`, `custom_emoji: "🥇"`, with the reactor's handle. Webhook not yet tested |
+| Standard tapbacks arrive (fallback) | ❤️ 👍 ‼️ 👎 on the same message | Pass via poll, Nov 10: 👎 arrives as `type: dislike` |
 | Real monthly price | Linq dashboard or sales | Not checked |
 
 ## Known constraints

@@ -69,5 +69,17 @@ class FilmPage(unittest.TestCase):
         self.assertEqual((p.tmdb_id, p.tmdb_type, p.rating), (12, "tv", None))
 
 
+
+class TitleMatch(unittest.TestCase):
+    def test_articles_and_votes(self):
+        from movie_night.tmdb import best_match
+        results = [{"id": 1, "title": "The Piercing Gaze: Memories of a Bizarre Murder", "vote_count": 0},
+                   {"id": 2, "title": "Memories of a Murderer: The Nilsen Tapes", "vote_count": 101},
+                   {"id": 3, "title": "Memories of Murder", "vote_count": 4933}]
+        self.assertEqual(best_match("Memories of a Murder", results)["id"], 3)
+        self.assertEqual(best_match("wicker man", [{"id": 9, "title": "The Wicker Man", "vote_count": 5},
+                                                   {"id": 8, "title": "The Wicker Man", "vote_count": 900}])["id"], 8)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -54,7 +54,7 @@ just maybe also good great fun new old one two what what's whats how who which""
 
 LIKE_RE = re.compile(
     r"\b(?:(?:a lot|much|kind of|sort of|something|anything|more|movies?|films?)\s+)?"
-    r"(?:like|similar to|in the vein of|along the lines of)\s+"
+    r"(?:like|similar to|as good as|in the vein of|along the lines of)\s+"
     r"[\"“']?(?P<title>[^\"”'?!.,]+?)[\"”']?\s*(?:\((?P<year>\d{4})\))?\s*(?:[?!.,]|$)",
     re.I,
 )

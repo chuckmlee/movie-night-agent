@@ -31,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import sync as sync_mod
-from .agent import Linq, State, load_history, step
+from .agent import Linq, State, load_history, step, tmdb_lookup
 
 STATUS = {"started": dt.datetime.now(dt.timezone.utc).isoformat(), "last_poll": None, "last_sync": None,
           "last_event": None, "errors": 0}
@@ -82,7 +82,12 @@ def run_sync(user: str, data: Path) -> None:
 
 
 def sync_loop(user: str, data: Path, hour: int) -> None:
-    if not (data / "films.json").exists():
+    cache_path = data / "films.json"
+    stale = not cache_path.exists()
+    if not stale:  # a cache from before topic search has no keywords yet
+        cache = json.loads(cache_path.read_text())
+        stale = any(e.get("tmdb_id") and "keywords" not in e for e in cache.values())
+    if stale:
         run_sync(user, data)
     while True:
         now = dt.datetime.now(dt.timezone.utc)
@@ -107,7 +112,7 @@ def agent_loop(chat: str, data: Path, every: float) -> None:
     while True:
         try:
             cache = json.loads((data / "films.json").read_text())  # picks up the daily sync
-            what = step(linq, chat, state, cache, history)
+            what = step(linq, chat, state, cache, history, lookup=tmdb_lookup)
             STATUS["last_poll"] = dt.datetime.now(dt.timezone.utc).isoformat()
             if what:
                 STATUS["last_event"] = what

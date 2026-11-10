@@ -29,15 +29,20 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import linq_format
-from .picker import choose, parse_hints
+from . import linq_format, tmdb
+from .picker import plan
 from .rules import Film, History, Reaction, ReactionEvent, Session
 
 LINQ = "https://api.linqapp.com/api/partner/v3"
 DATA = Path("data")
 # Deliberately narrow, so "great movie!" after a session doesn't start another one.
 KICKOFF_RE = re.compile(
-    r"\bmovie\s+(night|tonight|time)\b|\bmovies?\s*\?|\bpick\s+(us\s+)?a\s+movie\b|^\s*movie\s*$|🎬", re.I)
+    r"\bmovie\s+(night|tonight|time)\b|\bmovies?\s*\?|\bpick\s+(us\s+)?a\s+movie\b|^\s*movie\s*$|🎬"
+    r"|^\s*(hey\s+|ok\s+)?delo\b",  # talking to Delo by name
+    re.I)
+# "something a lot like The Wicker Man", "any movies similar to Heat": a request
+# even without "movie night", as long as the title resolves on TMDB.
+LIKE_KICKOFF_RE = re.compile(r"\b(something|anything|movies?|films?)\b[^.?!]*\b(like|similar to)\b", re.I)
 TALLY_RE = re.compile(r"^\s*(tally|done|count|results?|pick it|decide)\b", re.I)
 RECENT_SESSIONS_EXCLUDED = 3
 
@@ -145,14 +150,16 @@ def explain(result, cache: dict, names: dict[str, str]) -> str:
     return line
 
 
-def reason_for(entry: dict) -> str | None:
-    """v1 "why": the Letterboxd rating. An LLM-written line can replace this later."""
-    r = entry.get("letterboxd_rating")
-    return f"★ {r:.1f} on Letterboxd" if r else None
-
-
 MEDALS = (Reaction.GOLD, Reaction.SILVER, Reaction.BRONZE)
 SETTLE_SECONDS = 90
+
+
+def tmdb_lookup(title: str, year: int | None = None) -> dict | None:
+    """tmdb.search, but a TMDB outage just means no "like X" match."""
+    try:
+        return tmdb.search(title, year)
+    except (urllib.error.URLError, TimeoutError, KeyError, ValueError):
+        return None
 
 
 def everyone_gave_gold(session: Session) -> bool:
@@ -179,8 +186,9 @@ def ready_to_tally(session: Session, active: dict, now: float) -> bool:
 
 
 def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict],
-         names: dict[str, str] | None = None, seed: int | None = None, now: float | None = None) -> str | None:
-    """One poll. Returns what happened, for logging."""
+         names: dict[str, str] | None = None, seed: int | None = None, now: float | None = None,
+         lookup=None) -> str | None:
+    """One poll. Returns what happened, for logging. `lookup` resolves "like X" titles (tmdb.search)."""
     names = names or {}
     msgs = linq.messages(chat_id)
     # Chat members, not just people who have texted: someone who only ever
@@ -192,27 +200,29 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
             state.seen.append(m["id"])
 
     if state.active is None:
-        kick = next((m for m in reversed(new) if KICKOFF_RE.search(_text(m))), None)
+        kick = next((m for m in reversed(new)
+                     if KICKOFF_RE.search(_text(m)) or LIKE_KICKOFF_RE.search(_text(m))), None)
         if not kick:
             return None
-        hints = parse_hints(_text(kick))
+        text = _text(kick)
         recent = {s for h in history[-RECENT_SESSIONS_EXCLUDED:] for s in h.get("films", [])}
-        slugs = choose(cache, hints, n=5, exclude=recent, seed=seed)
-        if not slugs and not hints.allow_rent:
-            hints.allow_rent = True
-            slugs = choose(cache, hints, n=5, exclude=recent, seed=seed)
+        p = plan(text, cache, exclude=recent, seed=seed, lookup=lookup)
+        if not KICKOFF_RE.search(text) and (p.note or "").startswith("I couldn't find"):
+            return None  # "something like that" in passing; not a request
+        slugs = p.slugs
         if not slugs:
             linq.say(chat_id, "I couldn't find anything on the watchlist that fits. Try fewer limits?")
             return "kickoff: nothing fit"
         hist = history_for(history)
         no_veto = [names.get(p, p) for p in people if p in hist.vetoed_last_session]
-        intro = f"🍿 {len(slugs)} picks from the watchlist. React 🥇 🥈 🥉, veto with 👎."
+        intro = (f"🍿 {p.note}: " if p.note else "🍿 ") + \
+            f"{len(slugs)} picks from the watchlist. React 🥇 🥈 🥉, veto with 👎."
         if no_veto:
             intro += f" ({', '.join(no_veto)}: no veto tonight, you used one last time.)"
         linq.say(chat_id, intro)
         msg_to_slug = {}
         for slug in slugs:
-            for body in linq_format.pick_messages(linq_format.pick_from_cache(cache[slug], reason_for(cache[slug]))):
+            for body in linq_format.pick_messages(linq_format.pick_from_cache(cache[slug], p.reasons.get(slug))):
                 msg_to_slug[linq.send(chat_id, body)] = slug
         state.active = {"kickoff_id": kick["id"], "films": slugs, "msg_to_slug": msg_to_slug,
                         "started": dt.datetime.now(dt.timezone.utc).isoformat()}
@@ -259,7 +269,7 @@ def main(argv=None):
         state.save(state_path)
     while True:
         try:
-            what = step(linq, args.chat, state, cache, history)
+            what = step(linq, args.chat, state, cache, history, lookup=tmdb_lookup)
         except urllib.error.URLError as e:
             what = f"poll failed: {e}"
         if what:

@@ -245,8 +245,10 @@ def ready_to_tally(session: Session, active: dict, now: float) -> bool:
 
 def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict],
          names: dict[str, str] | None = None, seed: int | None = None, now: float | None = None,
-         lookup=None, taste: dict | None = None, posters=poster_lookup, emojis=emoji_mod.offline) -> str | None:
-    """One poll. Returns what happened, for logging. `lookup` resolves "like X" titles (tmdb.search)."""
+         lookup=None, taste: dict | None = None, posters=poster_lookup, emojis=emoji_mod.offline,
+         ask=None) -> str | None:
+    """One poll. Returns what happened, for logging. `lookup` resolves "like X" titles (tmdb.search);
+    `ask` (movie_night.ask.Asker) lets Claude choose picks for asks with nuance."""
     names = names or {}
     if state.active and state.active.get("entries"):
         # Wildcards live in taste.json, which the daily rebuild may change
@@ -266,7 +268,7 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
     if kick:
         text = _text(kick)
         recent = {s for h in history[-RECENT_SESSIONS_EXCLUDED:] for s in h.get("films", [])}
-        p = plan(text, cache, exclude=recent, seed=seed, lookup=lookup, taste=taste)
+        p = plan(text, cache, exclude=recent, seed=seed, lookup=lookup, taste=taste, ask=ask)
         if not KICKOFF_RE.search(text) and (p.note or "").startswith("I couldn't find"):
             p = None  # "something like that" in passing; not a request
     if p is not None and state.active is not None:

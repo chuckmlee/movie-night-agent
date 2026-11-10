@@ -130,8 +130,34 @@ def _rating_line(e: dict) -> str | None:
     return f"★ {r:.1f} on Letterboxd" if r else None
 
 
+def ask_pool(cache: dict, h: Hints, exclude: set[str], scores: dict, seed_film: dict | None,
+             vocab, size: int = 50) -> dict[str, dict]:
+    """The shortlist Claude chooses from for a nuanced ask: the closest matches to a
+    named film first (if any), then the household's best-scored films; mostly watchlist."""
+    from . import search
+
+    n_films = sum(1 for e in cache.values() if e.get("on_watchlist"))
+
+    def ranked(wildcard: bool) -> list[str]:
+        rows = []
+        for slug, e in cache.items():
+            if slug in exclude or not eligible(e, h, wildcard=wildcard):
+                continue
+            if seed_film and e.get("tmdb_id") == seed_film.get("tmdb_id"):
+                continue
+            sim = search.similarity(e, seed_film, vocab, n_films)[0] if seed_film else 0.0
+            fit = e.get("score") if wildcard else (scores.get(slug) or [None])[0]
+            rows.append((sim, fit if fit is not None else (e.get("letterboxd_rating") or 0), slug))
+        rows.sort(reverse=True)
+        return [r[2] for r in rows]
+
+    wild_n = size // 5
+    picks = ranked(False)[:size - wild_n] + ranked(True)[:wild_n]
+    return {s: cache[s] for s in picks}
+
+
 def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | None = None,
-         lookup=None, n: int = 5, taste: dict | None = None) -> Plan:
+         lookup=None, n: int = 5, taste: dict | None = None, ask=None) -> Plan:
     """Turn a kickoff message into picks: plain, topic search, or "more like X".
 
     `lookup(title, year)` resolves a title on TMDB (tmdb.search); injected so
@@ -147,6 +173,17 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
     like = search.find_like(text)
     seed_film = lookup(*like) if (like and lookup) else None
     topics = {} if seed_film else search.find_topics(text, vocab)
+
+    if ask is not None:
+        from .ask import is_nuanced
+
+        if is_nuanced(text):
+            got = ask(text, ask_pool(cache, hints, exclude, scores, seed_film, vocab), seed_film)
+            if got:
+                note, chosen = got
+                reasons = {s: " · ".join(x for x in (why, _rating_line(cache[s])) if x) for s, why in chosen}
+                slugs = [s for s, _ in chosen]
+                return Plan(slugs, reasons, note, wildcards=[s for s in slugs if not cache[s].get("on_watchlist")])
 
     def run(h: Hints) -> Plan:
         if seed_film:

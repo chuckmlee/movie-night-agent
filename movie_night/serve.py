@@ -35,6 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import emoji as emoji_mod
+from .ask import Asker
 from . import circle as circle_mod
 from . import sync as sync_mod
 from . import taste as taste_mod
@@ -163,6 +164,7 @@ def agent_loop(chat: str, data: Path, every: float) -> None:
     history = load_history(hist_path)
     backoff = every
     emojis = emoji_mod.Emojis(data / "emoji.json", log=log)
+    asker = Asker(log=log)
     while True:
         try:
             if not state.seen:
@@ -173,7 +175,7 @@ def agent_loop(chat: str, data: Path, every: float) -> None:
             taste = taste_mod.load(data)
             if taste:
                 cache.update(taste.get("wildcards") or {})
-            what = step(linq, chat, state, cache, history, lookup=tmdb_lookup, taste=taste, emojis=emojis)
+            what = step(linq, chat, state, cache, history, lookup=tmdb_lookup, taste=taste, emojis=emojis, ask=asker)
             STATUS["last_poll"] = dt.datetime.now(dt.timezone.utc).isoformat()
             if what:
                 STATUS["last_event"] = what

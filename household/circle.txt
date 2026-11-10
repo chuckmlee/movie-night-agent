@@ -139,3 +139,4 @@ indiewire  # IndieWire
 kinolorber  # Kino Lorber
 elbaxter  # elbaxter
 theportman  # Graham (link from Chuck)
+mrmoviesrd  # Rafael "Mister Movie" Jovine (link from Chuck)

@@ -61,6 +61,12 @@ class Linq:
         msgs = self._call("GET", f"/chats/{chat_id}/messages").get("messages", [])
         return sorted(msgs, key=lambda m: m.get("created_at") or "")
 
+    def members(self, chat_id: str) -> list[str]:
+        """Everyone in the chat except the agent's own line."""
+        chat = self._call("GET", f"/chats/{chat_id}")
+        return sorted(h["handle"] for h in chat.get("handles", [])
+                      if not h.get("is_me") and h.get("status", "active") == "active")
+
     def send(self, chat_id: str, body: dict) -> str:
         if self.dry_run:
             parts = body["message"]["parts"]
@@ -89,10 +95,6 @@ class State:
 
 def _text(m: dict) -> str:
     return " ".join(p.get("value") or "" for p in m.get("parts") or [] if p.get("type") == "text")
-
-
-def _people(msgs: list[dict]) -> list[str]:
-    return sorted({h["handle"] for m in msgs for h in [m.get("from_handle") or {}] if h and not h.get("is_me")})
 
 
 def load_history(path: Path) -> list[dict]:
@@ -157,7 +159,9 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
     """One poll. Returns what happened, for logging."""
     names = names or {}
     msgs = linq.messages(chat_id)
-    people = _people(msgs)
+    # Chat members, not just people who have texted: someone who only ever
+    # reacts still has to vote before the tally (first live session, Nov 10).
+    people = linq.members(chat_id)
     new = [m for m in msgs if m["id"] not in state.seen and not (m.get("from_handle") or {}).get("is_me")]
     for m in msgs:
         if m["id"] not in state.seen:

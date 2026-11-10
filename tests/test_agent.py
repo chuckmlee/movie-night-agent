@@ -39,6 +39,9 @@ class FakeLinq:
     def human(self, handle, text):
         return self._add(handle, text)
 
+    def members(self, chat_id):
+        return [A, B]
+
     def messages(self, chat_id):
         return list(self.msgs)
 
@@ -78,8 +81,7 @@ class Hints(unittest.TestCase):
 class Flow(unittest.TestCase):
     def setUp(self):
         self.linq, self.state, self.history = FakeLinq(), State(), []
-        self.linq.human(A, "hey")
-        self.linq.human(B, "hi")
+        self.linq.human(A, "hey")  # B never texts, only reacts
 
     def poll(self):
         return step(self.linq, "chat", self.state, CACHE, self.history, seed=0)
@@ -118,6 +120,14 @@ class Flow(unittest.TestCase):
             self.assertTrue(KICKOFF_RE.search(t), t)
         for t in ["great movie!", "that movie was long", "the movie theater"]:
             self.assertFalse(KICKOFF_RE.search(t), t)
+
+    def test_waits_for_member_who_only_reacts(self):
+        self.linq.human(A, "movie night?")
+        self.poll()
+        self.linq.react(pick_msg(self.linq, self.state, "alpha"), A, "🥇")
+        self.assertIsNone(self.poll())  # B is in the chat and hasn't voted
+        self.linq.react(pick_msg(self.linq, self.state, "bravo"), B, "🥇")
+        self.assertTrue(self.poll().startswith("tally"))
 
     def test_tally_on_request(self):
         self.linq.human(A, "movie")

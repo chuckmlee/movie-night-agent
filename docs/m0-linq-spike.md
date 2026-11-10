@@ -26,3 +26,7 @@ Everything after M0 depends on the answer, so this gate is checked first.
 - **Pass:** build on Linq.
 - **Only standard tapbacks come through:** map ❤️ gold, 👍 silver, ‼️ bronze, 👎 veto, or accept text replies like "1 3 2 veto".
 - **No group chats on the free line, or the price is too high:** fall back to BlueBubbles on an always-on Mac.
+
+## Decision (Nov 10)
+
+The 👎 that arrived as `type: dislike` was a real thumbs-down tapback. Veto accepts either a 👎 tapback (`dislike`) or a custom 🚫 (`custom_emoji: "🚫"`). The custom path is proven by 🥇, so 🚫 should arrive the same way.

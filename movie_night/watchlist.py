@@ -80,6 +80,35 @@ def read_watchlist(username: str, delay: float = 1.0, max_pages: int | None = No
     return unique
 
 
+TMDB_RE = re.compile(r'data-tmdb-type="(\w+)"\s+data-tmdb-id="(\d+)"')
+RATING_RE = re.compile(r'"ratingValue":\s*([0-9.]+)')
+RATING_COUNT_RE = re.compile(r'"ratingCount":\s*(\d+)')
+
+
+@dataclass
+class FilmPage:
+    tmdb_id: int | None
+    tmdb_type: str | None  # "movie" or "tv"
+    rating: float | None  # Letterboxd average, out of 5
+    rating_count: int | None
+
+
+def parse_film_page(page_html: str) -> FilmPage:
+    m = TMDB_RE.search(page_html)
+    r = RATING_RE.search(page_html)
+    c = RATING_COUNT_RE.search(page_html)
+    return FilmPage(
+        int(m.group(2)) if m else None,
+        m.group(1) if m else None,
+        float(r.group(1)) if r else None,
+        int(c.group(1)) if c else None,
+    )
+
+
+def read_film_page(slug: str) -> FilmPage:
+    return parse_film_page(fetch(f"https://letterboxd.com/film/{slug}/"))
+
+
 if __name__ == "__main__":
     import argparse
     import sys

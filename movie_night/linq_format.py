@@ -28,6 +28,15 @@ class Pick:
     trailer_url: str | None = None  # direct watch URL, not a search page
 
 
+def pick_from_cache(entry: dict, reason: str | None = None) -> Pick:
+    """Build a Pick from a data/films.json entry written by movie_night.sync."""
+    from .tmdb import Availability
+
+    where = Availability(**entry["availability"]).where() if entry.get("availability") else None
+    return Pick(entry["title"], entry.get("year"), entry.get("runtime_min"),
+                tuple(entry.get("genres") or ()), where, reason, entry.get("trailer_url"))
+
+
 def _runtime(minutes: int) -> str:
     h, m = divmod(minutes, 60)
     return f"{h}h {m:02d}m" if h else f"{m}m"

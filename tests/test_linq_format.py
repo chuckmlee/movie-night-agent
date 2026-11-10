@@ -1,6 +1,6 @@
 import unittest
 
-from movie_night.linq_format import Pick, parse_reactions, pick_messages, pick_text
+from movie_night.linq_format import Pick, parse_reactions, pick_from_cache, pick_messages, pick_text
 from movie_night.rules import Reaction
 
 # Shape copied from the live M0 poll on Nov 10, 2026 (phone numbers replaced).
@@ -32,6 +32,15 @@ class PickFormat(unittest.TestCase):
     def test_minimal_pick(self):
         self.assertEqual(pick_text(Pick("Heat")), "🎬 Heat")
         self.assertEqual(len(pick_messages(Pick("Heat"))), 1)
+
+
+class FromCache(unittest.TestCase):
+    def test_cache_entry(self):
+        entry = {"title": "Arrival", "year": 2016, "runtime_min": 116, "genres": ["Drama", "Science Fiction"],
+                 "trailer_url": "https://www.youtube.com/watch?v=tFMo3UJ4B4g",
+                 "availability": {"included": [], "rent": ["Prime Video"], "buy": []}}
+        self.assertEqual(pick_text(pick_from_cache(entry)),
+                         "🎬 Arrival (2016)\n1h 56m · Drama, Science Fiction · Rent on Prime Video")
 
 
 class Reactions(unittest.TestCase):

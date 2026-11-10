@@ -61,3 +61,7 @@ Letterboxd's bot check allows only the first page of /films/ (the newest 72), so
 ## 2026-11-10: A pick is one message with its poster; trailers come on 👀
 
 Each pick is one Linq message: the TMDB poster as a media part, then the short text. Votes on either part count. Trailers are no longer sent with every pick, because five link cards bury the picks. Reacting 👀 on a pick makes Delo reply in a thread under that pick with the trailer card, once per film. 👀 is a request, not a vote. A Letterboxd link card would also show artwork, but a link part has to be the only part in its message, so it would split each pick in two again.
+
+## 2026-11-10: Pick text: a film-specific emoji, bold title, bullets, and an italic source label
+
+Every pick used to open with 🎬, which told you nothing. Now Claude chooses one emoji per film (a setting, object or motif, never a spoiler). It is cached in data/emoji.json, and a keyword or genre map stands in when there's no key or the call fails. The title is bold and each reason is its own bullet. The last line, in italics, says "From your watchlist" or "🃏 Wildcard: not on your watchlist", so the 3 + 2 split is visible on every pick. iMessage always shows an attachment and its text as separate bubbles, so the poster sits directly above the text as part of the same message.

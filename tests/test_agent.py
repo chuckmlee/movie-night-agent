@@ -64,6 +64,14 @@ def pick_msg(linq, state, slug):
     return next(mid for mid, s in state.active["msg_to_slug"].items() if s == slug)
 
 
+class Tokens(unittest.TestCase):
+    def test_clean_token(self):
+        from movie_night.agent import clean_token
+        for raw in ["abc123", "Bearer abc123", " bearer abc123 ", '"abc123"', "Bearer  abc123\n"]:
+            self.assertEqual(clean_token(raw), "abc123", raw)
+        self.assertIsNone(clean_token(""))
+
+
 class Hints(unittest.TestCase):
     def test_parse(self):
         h = parse_hints("movie tonight? something funny, under 2 hours, no horror")

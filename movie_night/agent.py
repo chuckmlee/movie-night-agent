@@ -47,9 +47,19 @@ TALLY_RE = re.compile(r"^\s*(tally|done|count|results?|pick it|decide)\b", re.I)
 RECENT_SESSIONS_EXCLUDED = 3
 
 
+def clean_token(token: str | None) -> str | None:
+    """Accept a key pasted with "Bearer " or stray spaces/quotes; the header adds Bearer itself."""
+    if not token:
+        return None
+    t = token.strip().strip('"').strip("'").strip()
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+    return t or None
+
+
 class Linq:
     def __init__(self, token: str | None = None, dry_run: bool = False):
-        self.token = token or "injected-by-proxy"
+        self.token = clean_token(token) or "injected-by-proxy"
         self.dry_run = dry_run
         self._fake = 0
 
@@ -66,6 +76,9 @@ class Linq:
         """Oldest first."""
         msgs = self._call("GET", f"/chats/{chat_id}/messages").get("messages", [])
         return sorted(msgs, key=lambda m: m.get("created_at") or "")
+
+    def phone_numbers(self) -> list[dict]:
+        return self._call("GET", "/phone_numbers").get("phone_numbers", [])
 
     def members(self, chat_id: str) -> list[str]:
         """Everyone in the chat except the agent's own line."""

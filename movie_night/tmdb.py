@@ -62,7 +62,10 @@ def _get(path: str, **params) -> dict:
     url = f"{BASE}{path}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    token = os.environ.get("TMDB_TOKEN") or "injected-by-proxy"
+    token = os.environ.get("TMDB_TOKEN", "").strip().strip('"').strip("'").strip()
+    if token.lower().startswith("bearer "):  # pasted with the prefix; the header adds it
+        token = token[7:].strip()
+    token = token or "injected-by-proxy"
     req = urllib.request.Request(url, headers={"Accept": "application/json", "Authorization": f"Bearer {token}"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())

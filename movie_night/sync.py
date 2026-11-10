@@ -108,6 +108,10 @@ def sync(username: str, data: Path = DATA, limit: int | None = None, log=print) 
         elif "keywords" not in entry:  # backfill for films cached before keywords existed
             try:
                 entry["keywords"] = tmdb.keywords(entry["tmdb_id"])
+            except urllib.error.HTTPError as err:
+                if err.code == 404:
+                    entry["keywords"] = []  # TMDB doesn't know this id; don't retry every boot
+                log(f"  tmdb keywords failed for {f.slug}: {err}")
             except urllib.error.URLError as err:
                 log(f"  tmdb keywords failed for {f.slug}: {err}")
             time.sleep(TMDB_DELAY)

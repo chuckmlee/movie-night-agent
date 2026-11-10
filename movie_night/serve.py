@@ -31,8 +31,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import sync as sync_mod
+from . import tmdb
 from .agent import Linq, State, load_history, step, tmdb_lookup
 
+SYNC_READY = threading.Event()  # set once the film cache is complete and current
 STATUS = {"started": dt.datetime.now(dt.timezone.utc).isoformat(), "last_poll": None, "last_sync": None,
           "last_event": None, "errors": 0}
 
@@ -86,9 +88,11 @@ def sync_loop(user: str, data: Path, hour: int) -> None:
     stale = not cache_path.exists()
     if not stale:  # a cache from before topic search has no keywords yet
         cache = json.loads(cache_path.read_text())
-        stale = any(e.get("tmdb_id") and "keywords" not in e for e in cache.values())
+        missing = sum(1 for e in cache.values() if e.get("tmdb_id") and "keywords" not in e)
+        stale = missing > 0.05 * max(len(cache), 1)
     if stale:
         run_sync(user, data)
+    SYNC_READY.set()
     while True:
         now = dt.datetime.now(dt.timezone.utc)
         nxt = now.replace(hour=hour, minute=0, second=0, microsecond=0)
@@ -98,19 +102,40 @@ def sync_loop(user: str, data: Path, hour: int) -> None:
         run_sync(user, data)
 
 
+def check_tokens(linq: Linq) -> None:
+    """Say plainly at boot whether each key works, instead of a traceback later."""
+    try:
+        linq.phone_numbers()
+        log("check: LINQ_TOKEN ok")
+    except urllib.error.HTTPError as e:
+        log(f"check: LINQ_TOKEN rejected by Linq (HTTP {e.code}). Set it to the raw key, without 'Bearer'.")
+    except urllib.error.URLError as e:
+        log(f"check: couldn't reach Linq: {e!r}")
+    try:
+        tmdb._get("/configuration")
+        log("check: TMDB_TOKEN ok")
+    except urllib.error.HTTPError as e:
+        log(f"check: TMDB_TOKEN rejected by TMDB (HTTP {e.code}). Use the long Read Access Token (eyJ...), raw.")
+    except urllib.error.URLError as e:
+        log(f"check: couldn't reach TMDB: {e!r}")
+
+
 def agent_loop(chat: str, data: Path, every: float) -> None:
     linq = Linq(token=os.environ.get("LINQ_TOKEN"))
     state_path, hist_path = data / "agent-state.json", data / "history.json"
-    while not (data / "films.json").exists():
-        time.sleep(10)  # first boot: wait for the initial sync
+    check_tokens(linq)
+    if not SYNC_READY.is_set():
+        log("agent: waiting for the first watchlist sync to finish")
+    SYNC_READY.wait()
     state = State.load(state_path)
     history = load_history(hist_path)
-    if not state.seen:
-        state.seen = [m["id"] for m in linq.messages(chat)]
-        state.save(state_path)
-        log(f"agent: watching chat, {len(state.seen)} existing messages skipped")
+    backoff = every
     while True:
         try:
+            if not state.seen:
+                state.seen = [m["id"] for m in linq.messages(chat)]
+                state.save(state_path)
+                log(f"agent: watching chat, {len(state.seen)} existing messages skipped")
             cache = json.loads((data / "films.json").read_text())  # picks up the daily sync
             what = step(linq, chat, state, cache, history, lookup=tmdb_lookup)
             STATUS["last_poll"] = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -119,10 +144,16 @@ def agent_loop(chat: str, data: Path, every: float) -> None:
                 log(f"agent: {what}")
             state.save(state_path)
             hist_path.write_text(json.dumps(history, indent=1))
+            backoff = every
+        except urllib.error.HTTPError as e:
+            STATUS["errors"] += 1
+            hint = " (check LINQ_TOKEN)" if e.code in (401, 403) else ""
+            log(f"agent: Linq returned HTTP {e.code}{hint}; retrying in {backoff:.0f}s")
+            backoff = min(backoff * 2, 300)  # don't hammer Linq with a bad key
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
             STATUS["errors"] += 1
             log(f"agent: poll failed: {e!r}")
-        time.sleep(every)
+        time.sleep(backoff)
 
 
 def main() -> None:

@@ -45,3 +45,15 @@ There's no scheduled "movie tonight?" message. A session starts only when someon
 ## 2026-11-09: Picks come only from the shared watchlist
 
 The watchlist is what the household has already said it wants to see. The agent's job is to choose from it, not to add to it.
+
+## 2026-11-10: One household taste profile, scored in plain arithmetic
+
+The Letterboxd account is shared and its ratings are a joint verdict, so there is one profile, not one per person. Each rated film weighs in from +1 (5 stars) to -1 (1 star), plus 0.5 for a heart. A film's score is its rarity-weighted keyword overlap with that profile, plus how the household rates its genres, plus a boost when TMDB recommends it from a loved film. No model is trained: every pick can name the loved films it resembles, and individual tastes show up later in medals and vetoes.
+
+## 2026-11-10: 3 watchlist picks plus 2 wildcards (supersedes "only the watchlist")
+
+A wildcard is a film the household hasn't rated and hasn't saved. It is labeled as one, so the watchlist stays the default.
+
+## 2026-11-10: Full rating history comes from the Letterboxd data export
+
+Letterboxd's bot check allows only the first page of /films/ (the newest 72), so the full history comes from the export the account owner downloads (Settings > Data). That is also the more honest route than working around the block.

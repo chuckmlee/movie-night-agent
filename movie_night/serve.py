@@ -85,11 +85,13 @@ def run_sync(user: str, data: Path) -> None:
 
 def sync_loop(user: str, data: Path, hour: int) -> None:
     cache_path = data / "films.json"
-    stale = not cache_path.exists()
+    stale = not cache_path.exists() or not (data / "sync-complete.json").exists()
     if not stale:  # a cache from before topic search has no keywords yet
         cache = json.loads(cache_path.read_text())
         missing = sum(1 for e in cache.values() if e.get("tmdb_id") and "keywords" not in e)
         stale = missing > 0.05 * max(len(cache), 1)
+    if cache_path.exists():
+        SYNC_READY.set()  # answer from the cache we have while the sync catches up
     if stale:
         run_sync(user, data)
     SYNC_READY.set()

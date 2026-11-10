@@ -102,7 +102,14 @@ def sync(username: str, data: Path = DATA, limit: int | None = None, log=print) 
                 stats["enrich_failed"] += 1
                 continue
             entry.update(runtime_min=e.runtime_min, genres=e.genres, trailer_url=e.trailer_url,
-                         overview=e.overview, availability=asdict(e.availability), availability_checked=today)
+                         overview=e.overview, availability=asdict(e.availability), availability_checked=today,
+                         keywords=e.keywords)
+            time.sleep(TMDB_DELAY)
+        elif "keywords" not in entry:  # backfill for films cached before keywords existed
+            try:
+                entry["keywords"] = tmdb.keywords(entry["tmdb_id"])
+            except urllib.error.URLError as err:
+                log(f"  tmdb keywords failed for {f.slug}: {err}")
             time.sleep(TMDB_DELAY)
         save_json(cache_path, cache)
 

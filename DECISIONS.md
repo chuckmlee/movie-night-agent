@@ -2,6 +2,10 @@
 
 Newest first. Each entry says what was decided and why.
 
+## 2026-11-10: Search and "more like this" use TMDB keywords, not an LLM
+
+"Delo, spy movies" matches TMDB's topic tags (with a small synonym list), and only tags that films on the watchlist actually carry count. "Something like The Wicker Man" looks the title up on TMDB and ranks the watchlist by shared tags (rarer tags count more, generic ones like "based on novel or book" don't count), shared genres, and TMDB's own related films. Every pick says why ("Shares: folk horror, human sacrifice"). It's predictable and testable; an LLM can widen the phrasing it understands later. Films on household services come before rentals.
+
 ## 2026-11-10: Host on Railway
 
 Chuck picked Railway: it deploys from the GitHub repo on every merge, with no command line, so features ship as soon as a PR is approved. One container runs the agent, the daily sync and a health check, with a volume at /data. It replaces "poll first, host later". The agent still polls; webhooks come later.

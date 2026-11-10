@@ -55,6 +55,7 @@ class Enrichment:
     trailer_url: str | None
     overview: str
     availability: Availability
+    keywords: list[str] = field(default_factory=list)  # TMDB topic tags, e.g. "spy", "folk horror"
 
 
 def _get(path: str, **params) -> dict:
@@ -107,11 +108,39 @@ def parse_details(d: dict) -> Enrichment:
         trailer_url=pick_trailer((d.get("videos") or {}).get("results", [])),
         overview=d.get("overview") or "",
         availability=parse_availability(((d.get("watch/providers") or {}).get("results") or {}).get("US")),
+        keywords=[k["name"] for k in (d.get("keywords") or {}).get("keywords", [])],
     )
 
 
 def enrich(tmdb_id: int) -> Enrichment:
-    return parse_details(_get(f"/movie/{tmdb_id}", append_to_response="videos,watch/providers"))
+    return parse_details(_get(f"/movie/{tmdb_id}", append_to_response="videos,watch/providers,keywords"))
+
+
+def keywords(tmdb_id: int) -> list[str]:
+    return [k["name"] for k in _get(f"/movie/{tmdb_id}/keywords").get("keywords", [])]
+
+
+def search(title: str, year: int | None = None) -> dict | None:
+    """Best TMDB match for a title someone typed, with keywords, genres and recommendations."""
+    params = {"query": title}
+    if year:
+        params["year"] = year
+    results = _get("/search/movie", **params).get("results", [])
+    if not results:
+        return None
+    # Prefer an exact title match, then popularity (TMDB's own order).
+    exact = [r for r in results if r.get("title", "").lower() == title.lower()]
+    best = (exact or results)[0]
+    d = _get(f"/movie/{best['id']}", append_to_response="keywords,recommendations,similar")
+    return {
+        "tmdb_id": d["id"],
+        "title": d.get("title"),
+        "year": int(d["release_date"][:4]) if d.get("release_date") else None,
+        "genres": [g["name"] for g in d.get("genres", [])],
+        "keywords": [k["name"] for k in (d.get("keywords") or {}).get("keywords", [])],
+        "related_ids": [r["id"] for r in (d.get("recommendations") or {}).get("results", [])]
+        + [r["id"] for r in (d.get("similar") or {}).get("results", [])],
+    }
 
 
 def search_id(title: str, year: int | None) -> int | None:

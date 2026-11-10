@@ -20,6 +20,7 @@ The scoring is a few lines of arithmetic on purpose, so every pick can say why.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import html
 import json
 import math
@@ -31,6 +32,7 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from . import circle as circle_mod
 from . import tmdb
 from .search import GENERIC
 from .watchlist import fetch, read_film_page
@@ -41,6 +43,8 @@ LOVED_STARS = 4.0
 GENRE_WEIGHT = 1.5
 REC_WEIGHT = 1.0
 REC_CAP = 3
+CIRCLE_WEIGHT = 1.0  # one 5-star fan adds ~2.4; five add ~5.7 (log-scaled in circle.circle_boost)
+WILDCARD_CIRCLE_MIN = 1.0  # circle score that makes an unseen film a wildcard candidate
 WILDCARD_LOOKUPS = 250  # TMDB detail calls for wildcard candidates (each cached after the first run)
 WILDCARD_MIN_VOTES = 300
 WILDCARD_MIN_AVERAGE = 6.8
@@ -188,6 +192,7 @@ class Profile:
     recommended_by: dict[int, list[str]] = field(default_factory=dict)  # tmdb id -> loved slugs
     loved_keywords: dict[str, list[str]] = field(default_factory=dict)  # keyword -> loved slugs
     rated: dict = field(default_factory=dict)
+    circle: dict[int, dict] = field(default_factory=dict)  # tmdb id -> movie_night.circle.scores() entry
 
     def top_keywords(self, n=15) -> list[tuple[str, float]]:
         return sorted(self.keywords.items(), key=lambda kv: -kv[1])[:n]
@@ -234,8 +239,11 @@ def score(entry: dict, p: Profile) -> tuple[float, dict]:
     s_genre = sum(p.genres.get(g, 0.0) for g in genres) / max(len(genres), 1)
     recs = p.recommended_by.get(entry.get("tmdb_id"), [])
     s_rec = min(len(recs), REC_CAP)
-    total = s_kw + GENRE_WEIGHT * s_genre + REC_WEIGHT * s_rec
-    return total, {"keywords": round(s_kw, 2), "genres": round(s_genre, 2), "recommended_by": recs}
+    c = p.circle.get(entry.get("tmdb_id"))
+    s_circle = circle_mod.circle_boost(c["score"]) if c else 0.0
+    total = s_kw + GENRE_WEIGHT * s_genre + REC_WEIGHT * s_rec + CIRCLE_WEIGHT * s_circle
+    return total, {"keywords": round(s_kw, 2), "genres": round(s_genre, 2), "recommended_by": recs,
+                   "circle": round(s_circle, 2)}
 
 
 def reason(entry: dict, p: Profile, parts: dict) -> str:
@@ -270,11 +278,14 @@ def rank(cache: dict, p: Profile) -> list[Scored]:
 
 
 def wildcards(cache: dict, p: Profile, store: dict, lookups: int = WILDCARD_LOOKUPS, log=print) -> list[Scored]:
-    """Films recommended from loved films that the household hasn't rated or saved."""
+    """Films the household hasn't rated or saved: recommended from loved films, or loved by the circle."""
     seen = {e.get("tmdb_id") for e in p.rated.values()} | {e.get("tmdb_id") for e in cache.values()}
-    cands = sorted((rid for rid in p.recommended_by if rid not in seen), key=lambda r: -len(p.recommended_by[r]))
+    circle = sorted((t for t, c in p.circle.items() if c["score"] >= WILDCARD_CIRCLE_MIN and t not in seen),
+                    key=lambda t: -p.circle[t]["score"])
+    recs = sorted((rid for rid in p.recommended_by if rid not in seen), key=lambda r: -len(p.recommended_by[r]))
+    cands = list(dict.fromkeys(circle + recs))
     out = []
-    for rid in cands[:lookups]:
+    for rid in cands[:lookups + len(circle)]:
         key = str(rid)
         if key not in store:
             try:
@@ -284,7 +295,9 @@ def wildcards(cache: dict, p: Profile, store: dict, lookups: int = WILDCARD_LOOK
                 continue
             time.sleep(0.05)
         e = store[key]
-        if (e.get("vote_count") or 0) < WILDCARD_MIN_VOTES or (e.get("vote_average") or 0) < WILDCARD_MIN_AVERAGE:
+        new_release = (e.get("year") or 0) >= dt.date.today().year - 1  # too new for many votes
+        if not (rid in p.circle and new_release) and (
+                (e.get("vote_count") or 0) < WILDCARD_MIN_VOTES or (e.get("vote_average") or 0) < WILDCARD_MIN_AVERAGE):
             continue
         s, parts = score(e, p)
         out.append(Scored(key, s, reason(e, p, parts), parts))
@@ -328,11 +341,19 @@ def short_reason(r: str) -> str:
     return r.split("; ")[0]
 
 
+def pick_reason(s: Scored, e: dict, p: Profile) -> str:
+    """What Delo says under a pick: the loved films it resembles, then the circle's voice if any."""
+    lines = [short_reason(s.reason)] if s.parts["keywords"] > 0 or s.parts["recommended_by"] else []
+    c = p.circle.get(e.get("tmdb_id"))
+    v = circle_mod.voice(c) if c and c["score"] > 0 else None
+    if v:
+        lines.append("💬 " + v)
+    return "\n".join(lines) or short_reason(s.reason)
+
+
 def build(username: str, data: Path, export: Path | None = None, refresh: bool = True, log=print,
           keep_wild: int = 30) -> dict:
     """Refresh ratings and write data/taste.json, which Delo reads at kickoff."""
-    import datetime as dt
-
     rated_path, wild_path = data / "rated.json", data / "wildcards.json"
     store = json.loads(rated_path.read_text()) if rated_path.exists() else {}
     if refresh:
@@ -340,6 +361,7 @@ def build(username: str, data: Path, export: Path | None = None, refresh: bool =
         rated_path.write_text(json.dumps(store, indent=1, ensure_ascii=False))
     cache = json.loads((data / "films.json").read_text())
     p = build_profile(store)
+    p.circle = circle_mod.scores(circle_mod.load(data))
     wstore = json.loads(wild_path.read_text()) if wild_path.exists() else {}
     wild = wildcards(cache, p, wstore, log=log)[:keep_wild]
     today = dt.date.today().isoformat()
@@ -356,10 +378,11 @@ def build(username: str, data: Path, export: Path | None = None, refresh: bool =
     out = {
         "built": dt.datetime.now(dt.timezone.utc).isoformat(),
         "rated": len(store),
-        "scores": {s.slug: [round(s.score, 2), short_reason(s.reason)] for s in rank(cache, p)},
+        "scores": {s.slug: [round(s.score, 2), pick_reason(s, cache[s.slug], p)] for s in rank(cache, p)},
         "wildcards": {f"tmdb-{w.slug}": {**{k: wstore[w.slug].get(k) for k in (
             "tmdb_id", "title", "year", "runtime_min", "genres", "availability", "trailer_url")},
-            "wildcard": True, "on_watchlist": False, "score": round(w.score, 2), "reason": short_reason(w.reason)}
+            "wildcard": True, "on_watchlist": False, "score": round(w.score, 2),
+            "reason": pick_reason(w, wstore[w.slug], p)}
             for w in wild},
     }
     (data / "taste.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
@@ -391,6 +414,7 @@ def main(argv=None):
         rated_path.write_text(json.dumps(store, indent=1, ensure_ascii=False))
     cache = json.loads((args.data / "films.json").read_text())
     p = build_profile(store)
+    p.circle = circle_mod.scores(circle_mod.load(args.data))
     wstore = json.loads(wild_path.read_text()) if wild_path.exists() else {}
     wild = wildcards(cache, p, wstore, log=log)
     wild_path.write_text(json.dumps(wstore, indent=1, ensure_ascii=False))

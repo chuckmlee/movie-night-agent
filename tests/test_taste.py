@@ -62,5 +62,17 @@ class Profile(unittest.TestCase):
         self.assertIn("serial killer", r)
 
 
+    def test_circle_boosts_and_speaks(self):
+        from movie_night.taste import Scored, pick_reason
+        p = build_profile(RATED)
+        before, _ = score(CACHE["musical"], p)
+        p.circle = {12: {"score": 2.0, "people": [{"who": "ann", "signal": 1.0}, {"who": "bob", "signal": 1.0}],
+                         "best": {"who": "ann", "signal": 1.0, "quote": "Pure joy.", "stars": 5.0}}}
+        after, parts = score(CACHE["musical"], p)
+        self.assertGreater(after, before)
+        r = pick_reason(Scored("musical", after, reason(CACHE["musical"], p, parts), parts), CACHE["musical"], p)
+        self.assertIn("💬 ann (5★) and 1 more you follow: “Pure joy.”", r)
+
+
 if __name__ == "__main__":
     unittest.main()

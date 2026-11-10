@@ -11,6 +11,7 @@
 
 Config comes from the environment (set on the host, never committed):
   LINQ_TOKEN, TMDB_TOKEN   API credentials
+  ANTHROPIC_API_KEY        optional: lets Claude read the circle's reviews for quotes
   MNA_CHAT_ID              the household group chat id
   MNA_LETTERBOXD_USER      whose watchlist and ratings (default: chucklee)
   MNA_LETTERBOXD_EXPORT    unzipped Letterboxd data export, for the full rating
@@ -33,6 +34,7 @@ import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import circle as circle_mod
 from . import sync as sync_mod
 from . import taste as taste_mod
 from . import tmdb
@@ -93,6 +95,13 @@ def run_sync(user: str, data: Path) -> None:
     except Exception as e:  # a failed sync must not take the agent down
         STATUS["errors"] += 1
         log(f"sync failed: {e!r}")
+    try:  # reviews from the people you follow; the profile works without them
+        store = circle_mod.refresh(user, data, log=log)
+        STATUS["last_circle"] = {"people": len(store.get("people", [])), "reviews": len(store.get("reviews", {})),
+                                 "extracted": sum(1 for r in store.get("reviews", {}).values() if r.get("extract"))}
+    except Exception as e:
+        STATUS["errors"] += 1
+        log(f"circle refresh failed: {e!r}")
     try:  # the taste profile reads the fresh cache; picks fall back to ratings without it
         out = taste_mod.build(user, data, export=export_dir(data), log=log)
         STATUS["last_taste"] = {"at": out["built"], "rated": out["rated"], "wildcards": len(out["wildcards"])}

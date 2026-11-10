@@ -30,6 +30,8 @@ class Pick:
     reason: str | None = None  # one line on why it fits tonight
     trailer_url: str | None = None  # direct watch URL, not a search page
     poster_url: str | None = None  # TMDB image URL
+    emoji: str = "🎬"  # one per film, from movie_night.emoji
+    label: str | None = None  # "From your watchlist" or the wildcard note, in italics at the end
 
 
 POSTER_BASE = "https://image.tmdb.org/t/p/w500"
@@ -41,13 +43,19 @@ def poster_url(entry: dict) -> str | None:
     return f"{POSTER_BASE}{path}" if path else None
 
 
-def pick_from_cache(entry: dict, reason: str | None = None) -> Pick:
+WATCHLIST_LABEL = "From your watchlist"
+WILDCARD_LABEL = "🃏 Wildcard: not on your watchlist"
+
+
+def pick_from_cache(entry: dict, reason: str | None = None, emoji: str | None = None,
+                    label: str | None = None) -> Pick:
     """Build a Pick from a data/films.json entry written by movie_night.sync."""
     from .tmdb import Availability
 
     where = Availability(**entry["availability"]).where() if entry.get("availability") else None
     return Pick(entry["title"], entry.get("year"), entry.get("runtime_min"),
-                tuple(entry.get("genres") or ()), where, reason, entry.get("trailer_url"), poster_url(entry))
+                tuple(entry.get("genres") or ()), where, reason, entry.get("trailer_url"), poster_url(entry),
+                emoji or "🎬", label)
 
 
 def _runtime(minutes: int) -> str:
@@ -55,9 +63,19 @@ def _runtime(minutes: int) -> str:
     return f"{h}h {m:02d}m" if h else f"{m}m"
 
 
-def pick_text(pick: Pick) -> str:
-    """The text half of a pick: title line, facts line, optional reason."""
-    head = pick.title + (f" ({pick.year})" if pick.year else "")
+def _u16(text: str) -> int:
+    """Linq ranges count UTF-16 code units, so an emoji can count as 2."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _bullets(reason: str) -> list[str]:
+    """Each reason line, and each " · " clause in it, as its own bullet."""
+    return [f"• {c.strip()}" for line in reason.splitlines() for c in line.split(" · ") if c.strip()]
+
+
+def pick_part(pick: Pick) -> dict:
+    """The text part of a pick: bold title, facts, bulleted reasons, italic label."""
+    title = pick.title + (f" ({pick.year})" if pick.year else "")
     facts = []
     if pick.runtime_min:
         facts.append(_runtime(pick.runtime_min))
@@ -65,18 +83,27 @@ def pick_text(pick: Pick) -> str:
         facts.append(", ".join(pick.genres[:2]))
     if pick.where:
         facts.append(pick.where)
-    lines = [f"🎬 {head}"]
+    head = f"{pick.emoji} "
+    lines = [head + title]
     if facts:
         lines.append(" · ".join(facts))
-    if pick.reason:
-        lines.append(pick.reason)
-    return "\n".join(lines)
+    lines += _bullets(pick.reason or "")
+    decorations = [{"range": [_u16(head), _u16(head) + _u16(pick.title)], "style": "bold"}]
+    if pick.label:
+        start = _u16("\n".join(lines) + "\n")
+        lines.append(pick.label)
+        decorations.append({"range": [start, start + _u16(pick.label)], "style": "italic"})
+    return {"type": "text", "value": "\n".join(lines), "text_decorations": decorations}
+
+
+def pick_text(pick: Pick) -> str:
+    return pick_part(pick)["value"]
 
 
 def pick_message(pick: Pick) -> dict:
     """The Linq message body for one pick: poster (when there is one), then the text."""
     parts = [{"type": "media", "url": pick.poster_url}] if pick.poster_url else []
-    parts.append({"type": "text", "value": pick_text(pick)})
+    parts.append(pick_part(pick))
     return {"message": {"parts": parts}}
 
 

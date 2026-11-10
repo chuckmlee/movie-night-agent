@@ -195,7 +195,8 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
             if line:
                 reasons[s] = line
         for s in wild:
-            reasons[s] = "🃏 Wildcard, not on the watchlist" + (f" · {cache[s]['reason']}" if cache[s].get("reason") else "")
+            if cache[s].get("reason"):  # the 🃏 label goes on the pick message itself
+                reasons[s] = cache[s]["reason"]
         return Plan(slugs + wild, reasons, wildcards=wild)
 
     result = run(hints)

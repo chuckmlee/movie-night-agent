@@ -30,7 +30,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import linq_format, tmdb
+from . import emoji as emoji_mod, linq_format, tmdb
 from .picker import plan
 from .rules import Film, History, Reaction, ReactionEvent, Session
 
@@ -245,7 +245,7 @@ def ready_to_tally(session: Session, active: dict, now: float) -> bool:
 
 def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict],
          names: dict[str, str] | None = None, seed: int | None = None, now: float | None = None,
-         lookup=None, taste: dict | None = None, posters=poster_lookup) -> str | None:
+         lookup=None, taste: dict | None = None, posters=poster_lookup, emojis=emoji_mod.offline) -> str | None:
     """One poll. Returns what happened, for logging. `lookup` resolves "like X" titles (tmdb.search)."""
     names = names or {}
     if state.active and state.active.get("entries"):
@@ -288,9 +288,12 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
             intro += f" ({', '.join(no_veto)}: no veto tonight, you used one last time.)"
         linq.say(chat_id, intro)
         msg_to_slug = {}
+        marks = emojis({s: cache[s] for s in slugs})
         for slug in slugs:
             ensure_poster(cache[slug], posters)
-            body = linq_format.pick_message(linq_format.pick_from_cache(cache[slug], p.reasons.get(slug)))
+            label = linq_format.WILDCARD_LABEL if slug in p.wildcards else linq_format.WATCHLIST_LABEL
+            body = linq_format.pick_message(
+                linq_format.pick_from_cache(cache[slug], p.reasons.get(slug), marks.get(slug), label))
             msg_to_slug[linq.send(chat_id, body)] = slug
         state.active = {"kickoff_id": kick["id"], "films": slugs, "msg_to_slug": msg_to_slug,
                         "entries": {s: cache[s] for s in p.wildcards},

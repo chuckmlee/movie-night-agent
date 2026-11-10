@@ -26,12 +26,30 @@ class PickFormat(unittest.TestCase):
         parts = pick_message(p)["message"]["parts"]
         self.assertEqual(parts[0], {"type": "media", "url": "https://image.tmdb.org/t/p/w500/a.jpg"})
         text = parts[1]["value"]
-        self.assertEqual(text, "🎬 Arrival (2016)\n1h 56m · Sci-Fi, Drama · Paramount+\nQuiet and smart, under two hours.")
+        self.assertEqual(text, "🎬 Arrival (2016)\n1h 56m · Sci-Fi, Drama · Paramount+\n• Quiet and smart, under two hours.")
         self.assertNotIn("http", text)
 
     def test_minimal_pick(self):
         self.assertEqual(pick_text(Pick("Heat")), "🎬 Heat")
-        self.assertEqual(pick_message(Pick("Heat"))["message"]["parts"], [{"type": "text", "value": "🎬 Heat"}])
+        self.assertEqual(pick_message(Pick("Heat"))["message"]["parts"],
+                         [{"type": "text", "value": "🎬 Heat", "text_decorations": [{"range": [3, 7], "style": "bold"}]}])
+
+    def test_emoji_bold_title_bullets_and_italic_label(self):
+        p = Pick("Memories of Murder", 2003, 132, ("Crime", "Drama"), "Max",
+                 "Like Zodiac (5★) and Se7en (4.5★) · ★ 4.4 on Letterboxd\n💬 ann (5★): “Pure dread.”",
+                 emoji="🌾", label="🃏 Wildcard: not on your watchlist")
+        part = pick_message(p)["message"]["parts"][0]
+        self.assertEqual(part["value"], "🌾 Memories of Murder (2003)\n2h 12m · Crime, Drama · Max\n"
+                         "• Like Zodiac (5★) and Se7en (4.5★)\n• ★ 4.4 on Letterboxd\n• 💬 ann (5★): “Pure dread.”\n"
+                         "🃏 Wildcard: not on your watchlist")
+        units = part["value"].encode("utf-16-le")
+
+        def span(r):
+            return units[2 * r[0]:2 * r[1]].decode("utf-16-le")
+
+        bold, italic = part["text_decorations"]
+        self.assertEqual((span(bold["range"]), bold["style"]), ("Memories of Murder", "bold"))
+        self.assertEqual((span(italic["range"]), italic["style"]), ("🃏 Wildcard: not on your watchlist", "italic"))
 
     def test_trailer_is_a_threaded_standalone_link(self):
         self.assertEqual(trailer_message("https://www.youtube.com/watch?v=x", "msg-1"),

@@ -298,6 +298,33 @@ class Flow(unittest.TestCase):
         self.assertEqual(self.vpoll(), "veto: replaced bravo")
         self.assertIn("(too long)", self.linq.sent[-2])
 
+    def test_veto_matches_the_film_named_not_the_last_pick(self):
+        # Nov 11, live: "Delo veto fire walk with me, no David lynch tonight" vetoed Lamb, the last pick.
+        from movie_night.agent import text_veto
+        cache = {"tp": {"title": "Twin Peaks: Fire Walk with Me"}, "lamb": {"title": "Lamb"},
+                 "bl": {"title": "Bad Lieutenant"}}
+        active = {"msg_to_slug": {"bf5": "tp"}, "films": list(cache)}
+
+        def msg(text, reply_to=None):
+            return {"parts": [{"type": "text", "value": text}], "reply_to": reply_to}
+
+        self.assertEqual(text_veto(msg("Delo veto fire walk with me, no David lynch tonight"), active, cache),
+                         ("tp", "no david lynch tonight"))
+        # A swipe reply, exactly as Linq reported it live.
+        self.assertEqual(text_veto(msg("Veto, want Something not David lynch ",
+                                       {"message_id": "bf5", "part_index": 1}), active, cache),
+                         ("tp", "want Something not David lynch"))
+        self.assertEqual(text_veto(msg("veto the lieutenant one, too grim"), active, cache)[0], "bl")
+        self.assertEqual(text_veto(msg("veto, too long"), active, cache), (None, "too long"))  # ask, don't guess
+
+    def test_unnamed_veto_asks_which_one(self):
+        self.start()
+        n = len(self.state.active["films"])
+        self.linq.human(A, "veto, too long")
+        self.assertIsNone(self.vpoll())
+        self.assertIn("Which one?", self.linq.sent[-1])
+        self.assertEqual(len(self.state.active["films"]), n)
+
     def test_one_replacement_per_person(self):
         st = self.start()
         self.linq.react(pick_msg(self.linq, st, "alpha"), A, tapback="dislike")

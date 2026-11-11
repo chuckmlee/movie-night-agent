@@ -84,5 +84,5 @@ Suggested by Chuck. A veto, either a 👎 or a reply on a pick like "veto, too b
 "no war movies", brings one replacement pick, and the replacement can't be vetoed. Claude gets the reason,
 or when there's only a 👎, is told to infer it from the picks that were kept. The reason is also added to
 the session's ask, so later follow-ups keep avoiding it. Without a reply link, a message that starts with
-"veto" applies to the pick it names, or else to the latest pick. Fairness: whoever vetoed last session
+"veto" applies to the pick it names (Nov 11: matched loosely, so "fire walk with me" finds "Twin Peaks: Fire Walk with Me"); if it names none, Delo asks which one instead of guessing. Fairness: whoever vetoed last session
 sits out, unless everyone vetoed, in which case nobody owes anything.

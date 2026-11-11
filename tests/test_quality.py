@@ -78,6 +78,25 @@ class Ranking(unittest.TestCase):
         self.assertGreater(wins, 30)
 
 
+class Wiring(unittest.TestCase):
+    def test_serve_only_calls_what_quality_defines(self):
+        # Nov 11: a refactor dropped build/load/annotate and serve.py crashed on boot.
+        import re as re_
+        src = (Path(__file__).parent.parent / "movie_night" / "serve.py").read_text()
+        for name in set(re_.findall(r"quality_mod\.(\w+)", src)):
+            self.assertTrue(hasattr(quality, name), name)
+
+    def test_build_load_annotate_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            data = Path(d)
+            (data / "ratings.json").write_text(json.dumps({"tmdb-1": {"rt": 95, "mc": 85}, "tmdb-2": {"rt": 40}}))
+            entries = {"a": film(1, 4.4), "b": film(2, 3.1)}
+            quality.build(entries, data, log=lambda m: None)
+            quality.annotate(entries, quality.load(data))
+            self.assertEqual(quality.line(entries["a"]), "100/100 · ★ 4.4 on Letterboxd")
+            self.assertIn("quality", entries["b"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -14,6 +14,8 @@ Config comes from the environment (set on the host, never committed):
   ANTHROPIC_API_KEY        optional: lets Claude read the circle's reviews for quotes
   OMDB_API_KEY             optional: IMDb, Rotten Tomatoes and Metacritic for the quality score
   MNA_CHAT_ID              the household group chat id
+  MNA_TEST_CHAT_ID         optional: a second chat (e.g. just you and Delo) for testing; its sessions,
+                           vetoes and history live in data/test/ and never affect the household's
   MNA_LETTERBOXD_USER      whose watchlist and ratings (default: chucklee)
   MNA_LETTERBOXD_EXPORT    unzipped Letterboxd data export, for the full rating
                            history (default: $MNA_DATA/letterboxd-export, then
@@ -165,12 +167,18 @@ def check_tokens(linq: Linq) -> None:
         log(f"check: couldn't reach TMDB: {e!r}")
 
 
-def agent_loop(chat: str, data: Path, every: float, user: str = "chucklee") -> None:
+def agent_loop(chat: str, data: Path, every: float, user: str = "chucklee", state_dir: Path | None = None,
+               check: bool = True) -> None:
+    """Watch one chat. `state_dir` keeps a test chat's sessions, vetoes and history apart from the household's."""
     linq = Linq(token=os.environ.get("LINQ_TOKEN"))
-    state_path, hist_path = data / "agent-state.json", data / "history.json"
-    check_tokens(linq)
+    state_dir = state_dir or data
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state_path, hist_path = state_dir / "agent-state.json", state_dir / "history.json"
+    tag = "agent-test" if state_dir != data else "agent"
+    if check:
+        check_tokens(linq)
     if not SYNC_READY.is_set():
-        log("agent: waiting for the first watchlist sync to finish")
+        log(f"{tag}: waiting for the first watchlist sync to finish")
     SYNC_READY.wait()
     state = State.load(state_path)
     history = load_history(hist_path)
@@ -183,7 +191,7 @@ def agent_loop(chat: str, data: Path, every: float, user: str = "chucklee") -> N
             if not state.seen:
                 state.seen = [m["id"] for m in linq.messages(chat)]
                 state.save(state_path)
-                log(f"agent: watching chat, {len(state.seen)} existing messages skipped")
+                log(f"{tag}: watching chat, {len(state.seen)} existing messages skipped")
             cache = json.loads((data / "films.json").read_text())  # picks up the daily sync
             taste = taste_mod.load(data)
             if taste:
@@ -200,18 +208,18 @@ def agent_loop(chat: str, data: Path, every: float, user: str = "chucklee") -> N
             STATUS["last_poll"] = dt.datetime.now(dt.timezone.utc).isoformat()
             if what:
                 STATUS["last_event"] = what
-                log(f"agent: {what}")
+                log(f"{tag}: {what}")
             state.save(state_path)
             hist_path.write_text(json.dumps(history, indent=1))
             backoff = every
         except urllib.error.HTTPError as e:
             STATUS["errors"] += 1
             hint = " (check LINQ_TOKEN)" if e.code in (401, 403) else ""
-            log(f"agent: Linq returned HTTP {e.code}{hint}; retrying in {backoff:.0f}s")
+            log(f"{tag}: Linq returned HTTP {e.code}{hint}; retrying in {backoff:.0f}s")
             backoff = min(backoff * 2, 300)  # don't hammer Linq with a bad key
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
             STATUS["errors"] += 1
-            log(f"agent: poll failed: {e!r}")
+            log(f"{tag}: poll failed: {e!r}")
         time.sleep(backoff)
 
 
@@ -231,6 +239,11 @@ def main() -> None:
     threading.Thread(target=sync_loop, args=(user, data, hour), daemon=True, name="sync").start()
     agent = threading.Thread(target=agent_loop, args=(chat, data, every, user), daemon=True, name="agent")
     agent.start()
+    test_chat = os.environ.get("MNA_TEST_CHAT_ID", "").strip()
+    if test_chat and test_chat != chat:  # a private chat for trying Delo alone; it never touches the household's state
+        threading.Thread(target=agent_loop, args=(test_chat, data, every, user, data / "test", False),
+                         daemon=True, name="agent-test").start()
+        log("agent: also watching the test chat")
 
     Handler.data = data
     port = int(os.environ.get("PORT", "8080"))

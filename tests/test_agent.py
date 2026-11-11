@@ -292,6 +292,23 @@ class Flow(unittest.TestCase):
         self.assertIn("Vetoed: Alpha", self.linq.sent[-1])
         self.assertEqual(self.history[-1]["vetoed_by"], [B])
 
+    def test_seen_it_swaps_without_using_a_veto(self):
+        st = self.start()
+        seen_it = {}
+        self.linq.react(pick_msg(self.linq, st, "alpha"), A, "🙈")
+        got = step(self.linq, "chat", st, CACHE, self.history, seed=0, now=0, posters=lambda i: None, seen_it=seen_it)
+        self.assertEqual(got, "seen: replaced alpha")
+        self.assertIn(str(CACHE["alpha"]["tmdb_id"]), seen_it)
+        self.assertNotIn("alpha", st.active["films"])
+        self.assertIn("won't suggest it again", self.linq.sent[-2])
+        self.assertIn("letterboxd.com/tmdb/", self.linq.sent[-2])
+        self.assertIn("which you've seen", self.linq.sent[-1])
+        self.assertEqual(st.active.get("veto_by", {}), {})  # not a veto: A can still veto tonight
+        # Handled once, and medals on the seen film no longer count.
+        self.linq.react(pick_msg(self.linq, st, "alpha"), B, "🥇")
+        self.assertIsNone(step(self.linq, "chat", st, CACHE, self.history, seed=0, now=0, posters=lambda i: None,
+                               seen_it=seen_it))
+
     def test_veto_naming_a_film_without_a_reply(self):
         st = self.start()
         self.linq.human(A, "veto Bravo, too long")

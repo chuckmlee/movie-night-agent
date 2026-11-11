@@ -205,11 +205,23 @@ def agent_loop(chat: str, data: Path, every: float, user: str = "chucklee", stat
                 quality_mod.annotate(cache, quality_mod.load(data))
             except Exception as e:
                 log(f"quality: skipped this poll: {e!r}")
+            seen_path = data / "seen-it.json"  # 🙈, shared by every chat: films never to offer again
+            try:
+                seen_it = json.loads(seen_path.read_text()) if seen_path.exists() else {}
+            except json.JSONDecodeError:
+                seen_it = {}
+            keep = set((state.active or {}).get("films", []))
+            for slug in [s for s, e in cache.items() if str(e.get("tmdb_id")) in seen_it and s not in keep]:
+                del cache[slug]
+            seen_before = len(seen_it)
             try:  # "new on Netflix since Nov 3": from the daily availability snapshots
                 discover.annotate(cache, data)
             except Exception as e:
                 log(f"discover: skipped this poll: {e!r}")
-            what = step(linq, chat, state, cache, history, lookup=tmdb_lookup, taste=taste, emojis=emojis, ask=asker)
+            what = step(linq, chat, state, cache, history, lookup=tmdb_lookup, taste=taste, emojis=emojis, ask=asker,
+                        seen_it=seen_it)
+            if len(seen_it) != seen_before:
+                seen_path.write_text(json.dumps(seen_it, indent=1, ensure_ascii=False))
             STATUS["last_poll"] = dt.datetime.now(dt.timezone.utc).isoformat()
             if what:
                 STATUS["last_event"] = what

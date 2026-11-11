@@ -41,6 +41,7 @@ BATCH = 8  # reviews per extraction call
 MIN_REVIEW_CHARS = 80  # shorter entries are just a rating; nothing to extract
 QUOTE_MAX_WORDS = 30
 LIKE_BONUS = 0.25
+WARM = 0.6  # extracted sentiment that reads as a clearly warm review
 
 
 def read_following(username: str) -> list[str]:
@@ -221,8 +222,19 @@ def signal(r: dict) -> float:
     return s + (LIKE_BONUS if r.get("liked") else 0.0)
 
 
+def loves(r: dict) -> bool:
+    """The wildcard bar: 4 stars or more, a heart, or a clearly warm review.
+
+    When the review's words are negative they win over the stars."""
+    ex = r.get("extract")
+    if ex and ex["sentiment"] < 0:
+        return False
+    return (r.get("stars") or 0) >= 4 or bool(r.get("liked")) or bool(ex and ex["sentiment"] >= WARM)
+
+
 def scores(store: dict) -> dict[int, dict]:
-    """Per TMDB id: score (sum of each person's latest signal) and the best voice to quote."""
+    """Per TMDB id: score (sum of each person's latest signal), who loved it
+    (`fans`, by the wildcard bar) and the best voice to quote."""
     latest: dict[tuple[str, int], dict] = {}
     for r in store.get("reviews", {}).values():
         key = (r["who"], r["tmdb_id"])
@@ -231,10 +243,12 @@ def scores(store: dict) -> dict[int, dict]:
     films: dict[int, dict] = {}
     for (who, tid), r in latest.items():
         f = films.setdefault(tid, {"title": r["title"], "year": r.get("year"), "score": 0.0, "people": [],
-                                   "best": None})
+                                   "fans": [], "best": None})
         s = signal(r)
         f["score"] += s
         f["people"].append({"who": who, "signal": round(s, 2), "stars": r.get("stars")})
+        if loves(r):
+            f["fans"].append(who)
         q = (r.get("extract") or {}).get("quote")
         cand = (s, bool(q))
         if s > 0 and (f["best"] is None or cand > (f["best"]["signal"], bool(f["best"]["quote"]))):

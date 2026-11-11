@@ -66,5 +66,18 @@ class Circle(unittest.TestCase):
         self.assertEqual(voice(scores(store)[7340]), "ann (5★) loved it")
 
 
+class Loves(unittest.TestCase):
+    def test_wildcard_bar(self):
+        from movie_night.circle import loves, scores
+        self.assertTrue(loves({"stars": 4.0}))
+        self.assertTrue(loves({"stars": 3.0, "liked": True}))
+        self.assertTrue(loves({"extract": {"sentiment": 0.8}}))
+        self.assertFalse(loves({"stars": 3.5}))
+        self.assertFalse(loves({"stars": 4.5, "extract": {"sentiment": -0.4}}))  # the words win
+        store = {"reviews": {"a": {"who": "ann", "tmdb_id": 5, "title": "X", "stars": 4.5},
+                             "b": {"who": "bob", "tmdb_id": 5, "title": "X", "stars": 2.0}}}
+        self.assertEqual(scores(store)[5]["fans"], ["ann"])
+
+
 if __name__ == "__main__":
     unittest.main()

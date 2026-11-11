@@ -136,3 +136,21 @@ There were two causes, so there are two fixes:
 2. New ratings only reached the taste profile at 5 AM. Now movie_night.seen reads the household's diary
    RSS and the first page of films sorted by rating date, at most every 15 minutes, and drops anything
    just watched or rated, except the open session's picks. (Nov 11: the rated-date page returns 403 to Delo, so only the RSS is read, and a rating with no diary entry waits for 5 AM.)
+
+## Wildcards come only from the circle (Nov 11)
+
+A wildcard used to be either a film TMDB recommends from one the household loved, or one the circle
+scored highly. The TMDB recommendations were filler: they kept surfacing the same well-known titles. Now a
+wildcard is an unseen film that someone the household follows loved, which means they gave it 4 stars or
+more, hearted it, or wrote a clearly warm review (negative words outrank the stars). Wildcards rank by how
+many of those people loved it, with diminishing returns: one fan is worth about 6.7 of 17, two 10.7,
+three 13.2, five 15.6. The household's taste fit only breaks ties (20%), and the quality score blends in as
+for every pick. Shorts under an hour are left out. A film with one fan also needs 50 TMDB votes, unless it
+came out this year or last. TMDB lookups are capped at 300 new films a day and cached, so the pool grows
+over the first few days. Many of the circle's favorites are festival films that aren't out yet, so the
+pool of 30 is filled walking down the list and keeping only films that stream on a household service or
+can be rented (up to 200 availability checks a run).
+
+A count from the circle's feeds on Nov 11 (stars and hearts only; the review sentiment lives on Railway):
+264 people, 12,154 diary entries, 2,957 films the household hasn't seen that clear the bar. 2,301 have
+one fan, 385 two, 116 three and 155 four or more. The top of the list is mostly 2026 releases.

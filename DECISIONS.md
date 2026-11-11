@@ -154,3 +154,12 @@ can be rented (up to 200 availability checks a run).
 A count from the circle's feeds on Nov 11 (stars and hearts only; the review sentiment lives on Railway):
 264 people, 12,154 diary entries, 2,957 films the household hasn't seen that clear the bar. 2,301 have
 one fan, 385 two, 116 three and 155 four or more. The top of the list is mostly 2026 releases.
+
+## Cheaper review extraction (Nov 11)
+
+The first full extraction ran out of the $20 API credit. Reading the circle's 5,862 reviews with Opus cost
+more than the estimate, mostly in output. Extraction is simple reading, so it now uses Haiku with thinking
+off, which costs about 1/40th as much; the whole backlog comes to roughly a dollar. Picks for nuanced asks
+stay on Opus. Each sync reads at most 2,000 reviews, with 4★+ and hearted reviews first because they're
+the ones quoted under picks. Progress is saved every 10 batches, so a run that stops partway keeps what
+it already paid for.

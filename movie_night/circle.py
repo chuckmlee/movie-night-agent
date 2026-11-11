@@ -42,6 +42,7 @@ MAX_PER_RUN = 2000  # a ceiling on reviews read per sync, so one run can't drain
 MIN_REVIEW_CHARS = 80  # shorter entries are just a rating; nothing to extract
 QUOTE_MAX_WORDS = 30
 LIKE_BONUS = 0.25
+LOVED_TAGS = 3  # "loved for" phrases kept per film, most mentioned first
 WARM = 0.6  # extracted sentiment that reads as a clearly warm review
 TWIN_PRIOR = 3  # shrinkage: agreement only counts once someone shares several ratings with you
 TWIN_MIN = 0.45  # weight that makes someone a taste twin (perfect agreement on 3 films is 0.5)
@@ -289,12 +290,19 @@ def scores(store: dict, twin_info: dict | None = None) -> dict[int, dict]:
             f["fans"].append(who)
             if who in twin_info:
                 f.setdefault("twins", []).append(who)
+        if s > 0:
+            for phrase in (r.get("extract") or {}).get("loved") or []:
+                k = phrase.strip().lower().rstrip(".")
+                if k:
+                    f.setdefault("_loved", {})[k] = f.setdefault("_loved", {}).get(k, 0) + 1
         q = (r.get("extract") or {}).get("quote")
         cand = (s, bool(q))
         if s > 0 and (f["best"] is None or cand > (f["best"]["signal"], bool(f["best"]["quote"]))):
             f["best"] = {"who": who, "signal": s, "quote": q, "stars": r.get("stars"), "link": r.get("link")}
     for f in films.values():
         f["score"] = round(f["score"], 2)
+        counts = f.pop("_loved", {})
+        f["loved"] = [k for k, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))][:LOVED_TAGS]
     return films
 
 
@@ -309,6 +317,11 @@ def voice(f: dict) -> str | None:
     if others:
         line += f" and {others} more you follow"
     return line + (f": “{b['quote']}”" if b.get("quote") else " loved it")
+
+
+def loved_line(f: dict) -> str | None:
+    """What the circle loved about a film, from their reviews: "❤️ Loved for: the score, Kinski"."""
+    return "❤️ Loved for: " + ", ".join(f["loved"]) if f.get("loved") else None
 
 
 def circle_boost(score: float) -> float:

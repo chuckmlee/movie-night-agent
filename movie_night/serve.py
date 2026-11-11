@@ -41,6 +41,7 @@ from . import emoji as emoji_mod
 from .ask import Asker
 from . import circle as circle_mod
 from . import discover
+from . import honors as honors_mod
 from . import sync as sync_mod
 from . import quality as quality_mod
 from .seen import FreshSeen
@@ -116,6 +117,13 @@ def run_sync(user: str, data: Path) -> None:
     except Exception as e:
         STATUS["errors"] += 1
         log(f"taste profile failed: {e!r}")
+    try:  # festival prizes, Oscars and Criterion from Wikidata; picks work without them
+        films = json.loads((data / "films.json").read_text())
+        films.update((taste_mod.load(data) or {}).get("wildcards") or {})
+        honors_mod.refresh(films, data, log=log)
+    except Exception as e:
+        STATUS["errors"] += 1
+        log(f"honors failed: {e!r}")
     try:  # IMDb / Rotten Tomatoes / Metacritic via OMDb, then the blended score; picks work without it
         films = json.loads((data / "films.json").read_text())
         films.update((taste_mod.load(data) or {}).get("wildcards") or {})
@@ -205,6 +213,13 @@ def agent_loop(chat: str, data: Path, every: float, user: str = "chucklee", stat
                 quality_mod.annotate(cache, quality_mod.load(data))
             except Exception as e:
                 log(f"quality: skipped this poll: {e!r}")
+            try:  # 🏆 and "loved for" lines, and more for Claude to go on
+                honors_mod.annotate(cache, honors_mod.load(data))
+                loved = (taste or {}).get("circle_loved") or {}
+                for e in cache.values():
+                    e["circle_loved"] = loved.get(str(e.get("tmdb_id")))
+            except Exception as e:
+                log(f"honors: skipped this poll: {e!r}")
             seen_path = data / "seen-it.json"  # 🙈, shared by every chat: films never to offer again
             try:
                 seen_it = json.loads(seen_path.read_text()) if seen_path.exists() else {}

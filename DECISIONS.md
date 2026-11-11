@@ -226,3 +226,28 @@ Nosferatu the Vampyre (1979) came up as a wildcard because one person in the cir
 needs at least two people who loved it (4★+, a heart, or a warm review), or one taste twin. On Nov 11's
 feeds, that leaves about 650 films with two or more fans, plus the films a twin loved. Added Metrograph to the
 circle.
+
+## Festival prizes, Criterion, and what the circle loved (Nov 11)
+
+Two cheap sources of richer signal:
+
+**Honors from Wikidata** (movie_night/honors.py). Wikidata is open, keyed by TMDB id, and answers about
+150 films per query. For each film Delo keeps:
+- notable wins: Palme d'Or, Golden Lion and Golden Bear, other top festival prizes, and the major Oscars;
+- the Criterion Collection spine number.
+
+On Nov 11, 348 of 1,489 films had one or the other: 113 with a notable win and 268 Criterion releases.
+Three of Chuck's standouts are Criterion (Yi Yi, Exotica and Metropolitan). Wikidata's coverage of festival
+prizes is patchy (it misses Yi Yi's Cannes Best Director), so IMDb-Awards is the fallback if that matters.
+Kometa's dataset is scraped from IMDb, which is why it isn't used first.
+
+How honors are used:
+- Picks show a "🏆 Golden Bear · Criterion Collection" line.
+- Claude sees them for nuanced asks.
+- They count toward hidden gems: a Criterion release or festival winner with few ratings is treated as
+  quality 75.
+- They're cached in data/honors.json and refreshed every 30 days.
+
+**What the circle loved.** The review extraction already records up to three "loved" phrases per review.
+Delo now totals them per film from people who liked it, most mentioned first. Picks show "❤️ Loved for: the
+score, the ending" when there isn't a quote, and Claude sees the phrases too.

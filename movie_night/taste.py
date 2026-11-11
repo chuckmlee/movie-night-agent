@@ -381,6 +381,9 @@ def pick_reason(s: Scored, e: dict, p: Profile) -> str:
     v = circle_mod.voice(c) if c and c["score"] > 0 else None
     if v:
         lines.append("💬 " + v)
+    lv = circle_mod.loved_line(c) if c and c["score"] > 0 and "“" not in (v or "") else None  # a quote says more
+    if lv:
+        lines.append(lv)
     return "\n".join(lines) or short_reason(s.reason)
 
 
@@ -444,6 +447,7 @@ def build(username: str, data: Path, export: Path | None = None, refresh: bool =
                          "digital_release": wstore[w.slug]["digital_release"], "fans": w.parts.get("fans", 0),
                          "twins": w.parts.get("twins") or []} for w in soon],
         "twins": p.twins,
+        "circle_loved": {str(t): c["loved"] for t, c in p.circle.items() if c.get("loved") and c["score"] > 0},
     }
     (data / "taste.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
     log(f"taste: profile from {len(store)} films, {len(out['scores'])} watchlist scores, {len(wild)} wildcards")

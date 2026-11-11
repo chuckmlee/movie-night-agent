@@ -19,17 +19,25 @@ import datetime as dt
 import json
 from pathlib import Path
 
+from . import honors as honors_mod
+
 NEW_DAYS = 14
 SOON_DAYS = 14
 GEM_MAX_VOTES = 4000  # Incendies, the best known of Chuck's examples, has ~3,600; Sicario has ~10,000
 GEM_MIN_VOTES = 50  # below this, too few people have seen it to call it loved
 GEM_MIN_QUALITY = 70.0  # blended quality, 0-100, from at least two sources
+HONORED_QUALITY = 75.0  # stands in for quality when Criterion or a festival prize is all we have
 
 
 def gem(entry: dict) -> float | None:
     """The film's quality score if it's a hidden gem, else None."""
     q, info, votes = entry.get("quality"), entry.get("quality_info") or {}, entry.get("vote_count")
-    if q is None or info.get("sources", 0) < 2 or votes is None:
+    if votes is None:
+        return None
+    h = entry.get("honors") or {}
+    if (q is None or info.get("sources", 0) < 2) and (h.get("criterion") or honors_mod.festival_winner(entry)):
+        q = HONORED_QUALITY  # few ratings yet, but Criterion or a festival jury vouched for it
+    if q is None or (info.get("sources", 0) < 2 and q != HONORED_QUALITY):
         return None
     if not GEM_MIN_VOTES <= votes <= GEM_MAX_VOTES or q < GEM_MIN_QUALITY:
         return None

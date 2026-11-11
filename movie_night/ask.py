@@ -84,6 +84,9 @@ def _line(slug: str, e: dict) -> str:
         "director": e.get("directors") or None, "cast": (e.get("cast") or [])[:3] or None,
         "country": (e.get("countries") or [])[:2] or None, "language": e.get("language"),
         "tags": [k for k in (e.get("keywords") or [])][:12],
+        "honors": (e.get("honors") or {}).get("wins") or None,
+        "criterion": bool((e.get("honors") or {}).get("criterion")) or None,
+        "circle_loved_for": e.get("circle_loved") or None,
         "synopsis": (e.get("overview") or "")[:350],
     }, ensure_ascii=False)
 

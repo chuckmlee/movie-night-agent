@@ -40,6 +40,7 @@ from .ask import Asker
 from . import circle as circle_mod
 from . import sync as sync_mod
 from . import quality as quality_mod
+from .seen import FreshSeen
 from . import taste as taste_mod
 from . import tmdb
 from .agent import Linq, State, load_history, step, tmdb_lookup
@@ -164,7 +165,7 @@ def check_tokens(linq: Linq) -> None:
         log(f"check: couldn't reach TMDB: {e!r}")
 
 
-def agent_loop(chat: str, data: Path, every: float) -> None:
+def agent_loop(chat: str, data: Path, every: float, user: str = "chucklee") -> None:
     linq = Linq(token=os.environ.get("LINQ_TOKEN"))
     state_path, hist_path = data / "agent-state.json", data / "history.json"
     check_tokens(linq)
@@ -176,6 +177,7 @@ def agent_loop(chat: str, data: Path, every: float) -> None:
     backoff = every
     emojis = emoji_mod.Emojis(data / "emoji.json", log=log)
     asker = Asker(log=log)
+    seen = FreshSeen(user, log=log)
     while True:
         try:
             if not state.seen:
@@ -186,6 +188,10 @@ def agent_loop(chat: str, data: Path, every: float) -> None:
             taste = taste_mod.load(data)
             if taste:
                 cache.update(taste.get("wildcards") or {})
+            try:  # rated or logged since the 5 AM rebuild: don't offer it again today
+                seen.drop(cache, keep=(state.active or {}).get("films", []))
+            except Exception as e:
+                log(f"seen: skipped this poll: {e!r}")
             try:  # scores are a nicety; never let them stop the agent (Nov 11 crash loop)
                 quality_mod.annotate(cache, quality_mod.load(data))
             except Exception as e:
@@ -223,7 +229,7 @@ def main() -> None:
     every = float(os.environ.get("POLL_SECONDS", "4"))
 
     threading.Thread(target=sync_loop, args=(user, data, hour), daemon=True, name="sync").start()
-    agent = threading.Thread(target=agent_loop, args=(chat, data, every), daemon=True, name="agent")
+    agent = threading.Thread(target=agent_loop, args=(chat, data, every, user), daemon=True, name="agent")
     agent.start()
 
     Handler.data = data

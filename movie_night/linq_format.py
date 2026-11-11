@@ -31,7 +31,8 @@ class Pick:
     trailer_url: str | None = None  # direct watch URL, not a search page
     poster_url: str | None = None  # TMDB image URL
     emoji: str = "🎬"  # one per film, from movie_night.emoji
-    label: str | None = None  # "From your watchlist" or the wildcard note, in italics at the end
+    label: str | None = None  # only for wildcards and replacements, in italics at the end
+    score: str | None = None  # "86/100 · critics' favorite" (movie_night.quality.line)
 
 
 POSTER_BASE = "https://image.tmdb.org/t/p/w500"
@@ -43,7 +44,6 @@ def poster_url(entry: dict) -> str | None:
     return f"{POSTER_BASE}{path}" if path else None
 
 
-WATCHLIST_LABEL = "From your watchlist"
 WILDCARD_LABEL = "🃏 Wildcard: not on your watchlist"
 
 
@@ -52,10 +52,15 @@ def pick_from_cache(entry: dict, reason: str | None = None, emoji: str | None = 
     """Build a Pick from a data/films.json entry written by movie_night.sync."""
     from .tmdb import Availability
 
+    from .quality import line
+
     where = Availability(**entry["availability"]).where() if entry.get("availability") else None
+    if where and where.startswith("On "):
+        where = "Streaming on " + where[3:]
+    quoted = any(x.startswith("💬") for x in (reason or "").splitlines())
     return Pick(entry["title"], entry.get("year"), entry.get("runtime_min"),
                 tuple(entry.get("genres") or ()), where, reason, entry.get("trailer_url"), poster_url(entry),
-                emoji or "🎬", label)
+                emoji or "🎬", label, line(entry, skip_circle=quoted))
 
 
 def _runtime(minutes: int) -> str:
@@ -68,32 +73,44 @@ def _u16(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
-def _bullets(reason: str) -> list[str]:
-    """Each reason line, and each " · " clause in it, as its own bullet."""
-    return [f"• {c.strip()}" for line in reason.splitlines() for c in line.split(" · ") if c.strip()]
-
-
 def pick_part(pick: Pick) -> dict:
-    """The text part of a pick: bold title, facts, bulleted reasons, italic label."""
-    title = pick.title + (f" ({pick.year})" if pick.year else "")
+    """The text part of a pick (layout agreed with Chuck, Nov 11):
+
+        🦉 Twin Peaks: Fire Walk with Me (1992)     title bold
+        86/100 · critics' favorite
+        2h 15m · Drama, Mystery
+
+        Streaming on Max
+
+        Why it fits, in one sentence.
+        💬 ann (5★): “Pure dread.”                  quote italic
+
+        🃏 Wildcard: not on your watchlist          wildcards only, italic
+    """
+    head = f"{pick.emoji} "
     facts = []
     if pick.runtime_min:
         facts.append(_runtime(pick.runtime_min))
     if pick.genres:
         facts.append(", ".join(pick.genres[:2]))
+    blocks = [[head + pick.title + (f" ({pick.year})" if pick.year else "")]
+              + ([pick.score] if pick.score else []) + ([" · ".join(facts)] if facts else [])]
     if pick.where:
-        facts.append(pick.where)
-    head = f"{pick.emoji} "
-    lines = [head + title]
-    if facts:
-        lines.append(" · ".join(facts))
-    lines += _bullets(pick.reason or "")
-    decorations = [{"range": [_u16(head), _u16(head) + _u16(pick.title)], "style": "bold"}]
+        blocks.append([pick.where])
+    why = [x.strip() for x in (pick.reason or "").splitlines() if x.strip()]
+    if why:
+        blocks.append(why)
     if pick.label:
-        start = _u16("\n".join(lines) + "\n")
-        lines.append(pick.label)
-        decorations.append({"range": [start, start + _u16(pick.label)], "style": "italic"})
-    return {"type": "text", "value": "\n".join(lines), "text_decorations": decorations}
+        blocks.append([pick.label])
+    text, decorations = "", [{"range": [_u16(head), _u16(head) + _u16(pick.title)], "style": "bold"}]
+    for i, block in enumerate(blocks):
+        for j, ln in enumerate(block):
+            if i or j:
+                text += "\n\n" if j == 0 else "\n"
+            if ln.startswith("💬") or ln == pick.label:
+                decorations.append({"range": [_u16(text), _u16(text) + _u16(ln)], "style": "italic"})
+            text += ln
+    return {"type": "text", "value": text, "text_decorations": decorations}
 
 
 def pick_text(pick: Pick) -> str:

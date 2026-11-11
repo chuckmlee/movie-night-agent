@@ -105,3 +105,13 @@ is already shown in words ("Because you loved…"), and a fit percentage would m
 every night. The highlight is the circle's love if anyone loved the film, then a sharp critics-vs-audience
 split (35+ percentile points), then the best source. A score built on one source shows that source as-is
 ("★ 4.1 on Letterboxd") instead of a number that looks more certain than it is. Wildcards get the line too.
+
+## Pick layout (Nov 11)
+
+Agreed with Chuck. Each pick is the poster, then three blocks separated by blank lines. The header has
+the emoji and bold title (year not bold), the score line, then the runtime and two genres. The second
+block is "Streaming on Max" or "Rent on Apple TV". The third is the reason as one plain sentence, with a
+friend's quote in italics under it. Only wildcards get the italic 🃏 label, since the intro already counts
+watchlist picks. The score line stays on one line (38 characters or fewer), so the highlight is
+"critics' favorite" with no figure. When the pick already quotes someone in the circle, the highlight
+skips the circle so it isn't said twice.

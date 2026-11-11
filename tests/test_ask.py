@@ -56,7 +56,7 @@ class ClaudeChooses(unittest.TestCase):
         self.assertEqual(p.slugs, ["mother-joan", "tmdb-9"])  # unknown id dropped
         self.assertEqual(p.note, "Like The Devils, less shocking")
         self.assertEqual(p.wildcards, ["tmdb-9"])
-        self.assertTrue(p.reasons["mother-joan"].startswith("Same possessed convent, far less graphic · ★ 4.0"))
+        self.assertEqual(p.reasons["mother-joan"], "Same possessed convent, far less graphic")
         prompt = client.prompts[0]
         self.assertIn("Hysteria in a French town.", prompt)  # the named film is described
         self.assertNotIn('"title": "The Devils", "year": 1990', prompt)

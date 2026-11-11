@@ -133,12 +133,6 @@ class Plan:
         return s
 
 
-def _rating_line(e: dict) -> str | None:
-    """The blended score and its highlight once ratings are in (movie_night.quality); Letterboxd until then."""
-    from .quality import line
-    return line(e)
-
-
 def ask_pool(cache: dict, h: Hints, exclude: set[str], scores: dict, seed_film: dict | None,
              vocab, size: int = 50) -> dict[str, dict]:
     """The shortlist Claude chooses from for a nuanced ask: the closest matches to a
@@ -192,7 +186,7 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
             got = ask(text, ask_pool(cache, hints, exclude, scores, seed_film, vocab), seed_film)
             if got:
                 note, chosen = got
-                reasons = {s: " · ".join(x for x in (why, _rating_line(cache[s])) if x) for s, why in chosen}
+                reasons = {s: why for s, why in chosen if why}
                 slugs = [s for s, _ in chosen]
                 return Plan(slugs, reasons, note, wildcards=[s for s in slugs if not cache[s].get("on_watchlist")])
 
@@ -212,9 +206,8 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
             reasons = {}
             for _, _, _, slug, shared in top:
                 bits = [k for k in shared[:3]]
-                line = ("Shares: " + ", ".join(bits)) if bits else None
-                rl = _rating_line(cache[slug])
-                reasons[slug] = " · ".join(x for x in (line, rl) if x)
+                if bits:
+                    reasons[slug] = "Shares " + ", ".join(bits) + f" with {seed_film['title']}"
             label = seed_film["title"] + (f" ({seed_film['year']})" if seed_film.get("year") else "")
             return Plan([t[3] for t in top], reasons, f"More like {label}")
         if topics:
@@ -231,21 +224,18 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
                     hits.append((included, len(matched), fit, slug, matched))
             hits.sort(reverse=True)
             top = hits[:n]
-            reasons = {t[3]: " · ".join(x for x in (", ".join(t[4]).capitalize(), _rating_line(cache[t[3]])) if x)
-                       for t in top}
+            reasons = {t[3]: ", ".join(t[4]).capitalize() for t in top}
             return Plan([t[3] for t in top], reasons, " / ".join(t.capitalize() for t in topics))
         wild = choose(cache, h, n=WILDCARDS, exclude=exclude, seed=seed, wildcard=True) if taste else []
         slugs = choose(cache, h, n=n - len(wild), exclude=exclude, seed=seed, taste=scores)
         reasons = {}
         for s in slugs:
-            first, _, rest = ((scores.get(s) or [None, ""])[1] or "").partition("\n")
-            line = " · ".join(x for x in (first, _rating_line(cache[s])) if x) + (f"\n{rest}" if rest else "")
+            line = ((scores.get(s) or [None, ""])[1] or "").strip()
             if line:
                 reasons[s] = line
         for s in wild:
-            line = " · ".join(x for x in (cache[s].get("reason"), _rating_line(cache[s])) if x)
-            if line:  # the 🃏 label goes on the pick message itself
-                reasons[s] = line
+            if cache[s].get("reason"):  # the 🃏 label goes on the pick message itself
+                reasons[s] = cache[s]["reason"]
         return Plan(slugs + wild, reasons, wildcards=wild)
 
     result = run(hints)

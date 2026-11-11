@@ -189,24 +189,24 @@ def blend(entries: dict, ratings: dict, circle: dict[int, dict] | None = None,
 SPLIT = 35  # percentile gap between critics and audiences that is worth saying out loud
 
 
-def highlight(q: dict) -> str | None:
+def highlight(q: dict, skip_circle: bool = False) -> str | None:
     """The one thing that best explains a film's score (Chuck, Nov 11):
     the circle's love first, then a sharp critics/audience split, then the best source."""
     parts, raw = q.get("parts") or {}, q.get("raw") or {}
     fans = raw.get("fans", 0)
-    if fans and parts.get("circle", 0) > 0:
+    if fans and parts.get("circle", 0) > 0 and not skip_circle:  # skipped when the pick already quotes them
         return "someone you follow loved it" if fans == 1 else f"{fans} people you follow loved it"
     aud = [parts[s] for s in ("letterboxd", "imdb") if s in parts]
     if "critics" in parts and aud:
         gap = parts["critics"] - sum(aud) / len(aud)
         if gap >= SPLIT:
-            return "critics love it, audiences are split"
+            return "critics love it, fans split"
         if gap <= -SPLIT:
-            return "audiences love it more than critics do"
+            return "fans love it, critics split"
     best = max((s for s in parts if s != "circle"), key=lambda s: parts[s], default=None)
     if best == "critics":
         crit = f"{raw['rt']}% on Rotten Tomatoes" if raw.get("rt") is not None else f"{raw.get('mc')} on Metacritic"
-        return f"critics' favorite ({crit})" if parts["critics"] >= 70 else crit
+        return "critics' favorite" if parts["critics"] >= 70 else crit  # the full figure wouldn't fit one line
     if best == "letterboxd" and raw.get("letterboxd"):
         return f"★ {raw['letterboxd']:.1f} on Letterboxd"
     if best == "imdb" and raw.get("imdb"):
@@ -214,8 +214,12 @@ def highlight(q: dict) -> str | None:
     return None
 
 
-def line(entry: dict) -> str | None:
-    """The score line under a pick: "86/100, critics' favorite (94% on Rotten Tomatoes)".
+HEADER_WIDTH = 38  # characters that fit on one line of a pick bubble next to nothing else
+
+
+def line(entry: dict, skip_circle: bool = False) -> str | None:
+    """The score line under a pick's title: "86/100 · critics' favorite (94% on Rotten Tomatoes)",
+    shortened to "86/100 · critics' favorite" when it wouldn't fit on one line.
 
     One source isn't enough for a number that looks certain, so then it's that
     source as-is ("★ 4.1 on Letterboxd"), as before the blended score."""
@@ -223,32 +227,8 @@ def line(entry: dict) -> str | None:
     lb = entry.get("letterboxd_rating")
     if not q or q.get("sources", 0) < 2:
         return f"★ {lb:.1f} on Letterboxd" if lb else None
-    h = highlight(q)
-    return f"{round(q['score'])}/100" + (f", {h}" if h else "")
-
-
-def build(entries: dict, data: Path, log=print) -> dict:
-    """Recompute data/quality.json from the cached ratings and the circle."""
-    path = data / "ratings.json"
-    ratings = json.loads(path.read_text()) if path.exists() else {}
-    q = blend(entries, ratings, circle_mod.scores(circle_mod.load(data)))
-    (data / "quality.json").write_text(json.dumps(q, indent=1))
-    log(f"quality: scored {len(q)} films")
-    return q
-
-
-def load(data: Path) -> dict:
-    path = data / "quality.json"
-    try:
-        return json.loads(path.read_text()) if path.exists() else {}
-    except json.JSONDecodeError:
-        return {}
-
-
-def annotate(cache: dict, q: dict) -> None:
-    """Copy each film's score onto its cache entry as entry["quality"] (0-100) for the picker."""
-    for e in cache.values():
-        k = key(e)
-        if k in q:
-            e["quality"] = q[k]["score"]
-            e["quality_info"] = q[k]
+    h = highlight(q, skip_circle)
+    out = f"{round(q['score'])}/100" + (f" · {h}" if h else "")
+    if len(out) > HEADER_WIDTH:
+        out = re.sub(r"\s*\([^)]*\)$", "", out)
+    return out

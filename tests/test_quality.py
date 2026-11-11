@@ -89,15 +89,21 @@ class Presentation(unittest.TestCase):
 
     def test_circle_comes_first(self):
         e = self.q({"letterboxd": 90, "critics": 95, "circle": 70}, {"letterboxd": 4.2, "rt": 96, "fans": 3}, 86.4)
-        self.assertEqual(quality.line(e), "86/100, 3 people you follow loved it")
+        self.assertEqual(quality.line(e), "86/100 · 3 people you follow loved it")
 
     def test_split_then_best_source(self):
         e = self.q({"letterboxd": 40, "imdb": 30, "critics": 92}, {"letterboxd": 3.4, "rt": 94, "imdb": 6.6})
-        self.assertEqual(quality.line(e), "80/100, critics love it, audiences are split")
+        self.assertEqual(quality.line(e), "80/100 · critics love it, fans split")
         e = self.q({"letterboxd": 85, "critics": 78}, {"letterboxd": 4.1, "rt": 88})
-        self.assertEqual(quality.line(e), "80/100, ★ 4.1 on Letterboxd")
+        self.assertEqual(quality.line(e), "80/100 · ★ 4.1 on Letterboxd")
         e = self.q({"letterboxd": 70, "critics": 91}, {"letterboxd": 3.9, "mc": 88})
-        self.assertEqual(quality.line(e), "80/100, critics' favorite (88 on Metacritic)")
+        self.assertEqual(quality.line(e), "80/100 · critics' favorite")
+        e = self.q({"letterboxd": 70, "critics": 60}, {"letterboxd": 3.9, "mc": 66})
+        self.assertEqual(quality.line(e), "80/100 · ★ 3.9 on Letterboxd")
+        e = self.q({"letterboxd": 70, "critics": 91}, {"letterboxd": 3.9, "rt": 94})
+        self.assertEqual(quality.line(e), "80/100 · critics' favorite")
+        e = self.q({"letterboxd": 90, "critics": 95, "circle": 70}, {"letterboxd": 4.2, "rt": 96, "fans": 3})
+        self.assertEqual(quality.line(e, skip_circle=True), "80/100 · critics' favorite")  # the quote says it
 
     def test_one_source_shows_the_source_not_a_number(self):
         e = self.q({"letterboxd": 85}, {"letterboxd": 4.1})

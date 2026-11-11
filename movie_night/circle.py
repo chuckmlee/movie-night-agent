@@ -43,6 +43,8 @@ MIN_REVIEW_CHARS = 80  # shorter entries are just a rating; nothing to extract
 QUOTE_MAX_WORDS = 30
 LIKE_BONUS = 0.25
 WARM = 0.6  # extracted sentiment that reads as a clearly warm review
+TWIN_PRIOR = 3  # shrinkage: agreement only counts once someone shares several ratings with you
+TWIN_MIN = 0.45  # weight that makes someone a taste twin (perfect agreement on 3 films is 0.5)
 
 
 def read_following(username: str) -> list[str]:
@@ -240,14 +242,42 @@ def loves(r: dict) -> bool:
     return (r.get("stars") or 0) >= 4 or bool(r.get("liked")) or bool(ex and ex["sentiment"] >= WARM)
 
 
-def scores(store: dict) -> dict[int, dict]:
-    """Per TMDB id: score (sum of each person's latest signal), who loved it
-    (`fans`, by the wildcard bar) and the best voice to quote."""
+def _latest(store: dict) -> dict[tuple[str, int], dict]:
     latest: dict[tuple[str, int], dict] = {}
     for r in store.get("reviews", {}).values():
         key = (r["who"], r["tmdb_id"])
         if key not in latest or (r.get("watched") or "") > (latest[key].get("watched") or ""):
             latest[key] = r
+    return latest
+
+
+def twins(store: dict, rated: dict) -> dict[str, dict]:
+    """People in the circle who rate films the way the household does.
+
+    For each film both rated, agreement is 1 when the stars match, 0 at two stars
+    apart and -1 at four. A person's weight is their total agreement over
+    (shared films + TWIN_PRIOR), so one lucky match isn't enough. The feeds only
+    hold recent diary entries, so overlap grows as the circle cache does."""
+    house = {e["tmdb_id"]: e for e in rated.values() if e.get("tmdb_id") and e.get("stars") is not None}
+    pairs: dict[str, list[tuple[float, dict, dict]]] = {}
+    for (who, tid), r in _latest(store).items():
+        if tid in house and r.get("stars") is not None:
+            pairs.setdefault(who, []).append((1 - abs(r["stars"] - house[tid]["stars"]) / 2, r, house[tid]))
+    out = {}
+    for who, ps in pairs.items():
+        w = sum(max(-1.0, a) for a, _, _ in ps) / (len(ps) + TWIN_PRIOR)
+        if w >= TWIN_MIN:
+            both = sorted((p for p in ps if loves(p[1]) and (p[2]["stars"] >= 4 or p[2].get("liked"))),
+                          key=lambda p: -p[2]["stars"])
+            out[who] = {"weight": round(w, 2), "shared": len(ps), "both_loved": [h["title"] for _, _, h in both[:3]]}
+    return out
+
+
+def scores(store: dict, twin_info: dict | None = None) -> dict[int, dict]:
+    """Per TMDB id: score (sum of each person's latest signal), who loved it
+    (`fans`, by the wildcard bar) and the best voice to quote."""
+    latest = _latest(store)
+    twin_info = twin_info or {}
     films: dict[int, dict] = {}
     for (who, tid), r in latest.items():
         f = films.setdefault(tid, {"title": r["title"], "year": r.get("year"), "score": 0.0, "people": [],
@@ -257,6 +287,8 @@ def scores(store: dict) -> dict[int, dict]:
         f["people"].append({"who": who, "signal": round(s, 2), "stars": r.get("stars")})
         if loves(r):
             f["fans"].append(who)
+            if who in twin_info:
+                f.setdefault("twins", []).append(who)
         q = (r.get("extract") or {}).get("quote")
         cand = (s, bool(q))
         if s > 0 and (f["best"] is None or cand > (f["best"]["signal"], bool(f["best"]["quote"]))):

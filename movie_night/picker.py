@@ -124,13 +124,94 @@ class Plan:
     reasons: dict[str, str]
     note: str | None = None  # one line for the intro, e.g. "Spy films" or "Like The Wicker Man (1973)"
     wildcards: list[str] = field(default_factory=list)  # slugs in `slugs` that are off the watchlist
+    labels: dict[str, str] = field(default_factory=dict)  # slug -> italic last line ("💎 Hidden gem: ...")
+    kinds: dict[str, str] = field(default_factory=dict)  # slug -> "new" | "twin" | "gem" | "watchlist" (mix only)
+    extra: str | None = None  # one more intro line, e.g. what's coming to rent soon
 
     def summary(self) -> str:
+        if self.kinds:
+            counts = {k: sum(1 for v in self.kinds.values() if v == k) for k in KIND_NAMES}
+            bits = [KIND_NAMES[k](c) for k, c in counts.items() if c]
+            return f"{len(self.slugs)} picks: " + (", ".join(bits[:-1]) + " and " + bits[-1] if len(bits) > 1 else bits[0])
         n_list = len(self.slugs) - len(self.wildcards)
         s = f"{n_list} picks from the watchlist"
         if self.wildcards:
             s += f" and {len(self.wildcards)} wildcard{'s' if len(self.wildcards) > 1 else ''} 🃏"
         return s
+
+
+KIND_NAMES = {
+    "new": lambda c: f"{c} new on your services 🆕",
+    "twin": lambda c: f"{c} from {'a taste twin' if c == 1 else 'taste twins'} 👯",
+    "gem": lambda c: f"{c} hidden gem{'s' if c > 1 else ''} 💎",
+    "watchlist": lambda c: f"{c} from the watchlist",
+    "wild": lambda c: f"{c} wildcard{'s' if c > 1 else ''} 🃏",
+}
+NEW_SLOTS, TWIN_SLOTS, GEM_SLOTS = 2, 1, 2
+WILD_SUFFIX = " · 🃏 not on your watchlist"
+
+
+def twin_label(e: dict) -> str:
+    t = max(e.get("twins") or [{}], key=lambda t: t.get("weight", 0))
+    who = t.get("who", "someone you follow")
+    both = (t.get("both_loved") or [None])[0]
+    return f"👯 {who} rates like you" + (f": you both loved {both}" if both else "")
+
+
+def mix(cache: dict, h: Hints, n: int, exclude: set[str], seed: int | None, scores: dict) -> Plan:
+    """Tonight's mix (Chuck, Nov 11): watchlist films that just started streaming, a film
+    a taste twin loved (or another circle wildcard), hidden gems (loved, little seen), then the watchlist by taste."""
+    from . import discover
+
+    rng = random.Random(seed)
+
+    def fit(slug, e):
+        if not e.get("on_watchlist"):
+            return with_quality(e.get("score", 0), e) + rng.uniform(0, TASTE_JITTER)
+        if slug in scores:
+            return with_quality(scores[slug][0], e) + rng.uniform(0, TASTE_JITTER)
+        return with_quality((e.get("letterboxd_rating") or 3.0) * TASTE_SCALE / 5, e) + rng.uniform(0, TASTE_JITTER)
+
+    pool = [(s, e) for s, e in cache.items() if s not in exclude and (eligible(e, h) or eligible(e, h, wildcard=True))]
+    ranked = sorted(pool, key=lambda se: fit(*se), reverse=True)
+    picks, kinds, labels, per_genre = [], {}, {}, {}
+
+    def take(cands, kind, limit, label=None):
+        got = 0
+        for slug, e in cands:
+            if got >= limit or len(picks) >= n:
+                break
+            g = (e.get("genres") or ["?"])[0]
+            if slug in kinds or per_genre.get(g, 0) >= 2:
+                continue
+            picks.append(slug)
+            kinds[slug] = kind
+            per_genre[g] = per_genre.get(g, 0) + 1
+            lab = label(e) if label else None
+            if not e.get("on_watchlist"):
+                lab = (lab or "🃏 Wildcard") + (WILD_SUFFIX if lab else ": not on your watchlist")
+            if lab:
+                labels[slug] = lab
+            got += 1
+
+    take([se for se in ranked if se[1].get("new_on") and se[1].get("on_watchlist")], "new", NEW_SLOTS,
+         lambda e: f"🆕 New on {e['new_on']['on']} since {discover.short_date(e['new_on']['since'])}")
+    take([se for se in ranked if se[1].get("twins") and not se[1].get("on_watchlist")], "twin", TWIN_SLOTS, twin_label)
+    if "twin" not in kinds.values():  # no taste twin has loved anything new yet: a circle wildcard instead
+        take([se for se in ranked if not se[1].get("on_watchlist")], "wild", 1)
+    take([se for se in ranked if discover.gem(se[1]) is not None], "gem", GEM_SLOTS,
+         lambda e: "💎 Hidden gem: loved, little seen")
+    take([se for se in ranked if se[1].get("on_watchlist")], "watchlist", n)
+    order = ["new", "twin", "gem", "watchlist", "wild"]  # a plain wildcard goes last, as before
+    picks.sort(key=lambda s: order.index(kinds[s]))
+    reasons = {}
+    for s in picks:
+        e = cache[s]
+        line = ((scores.get(s) or [None, ""])[1] or "").strip() if e.get("on_watchlist") else (e.get("reason") or "")
+        if line:
+            reasons[s] = line
+    return Plan(picks, reasons, wildcards=[s for s in picks if not cache[s].get("on_watchlist")],
+                labels=labels, kinds=kinds)
 
 
 def ask_pool(cache: dict, h: Hints, exclude: set[str], scores: dict, seed_film: dict | None,
@@ -248,7 +329,13 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
             top = hits[:n]
             reasons = {t[3]: ", ".join(t[4]).capitalize() for t in top}
             return Plan([t[3] for t in top], reasons, " / ".join(t.capitalize() for t in topics))
-        wild = choose(cache, h, n=WILDCARDS, exclude=exclude, seed=seed, wildcard=True) if taste else []
+        if taste:
+            from . import discover
+
+            m = mix(cache, h, n, exclude, seed, scores)
+            m.extra = discover.soon_line(cache, taste)
+            return m
+        wild = []
         slugs = choose(cache, h, n=n - len(wild), exclude=exclude, seed=seed, taste=scores)
         reasons = {}
         for s in slugs:

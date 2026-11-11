@@ -8,6 +8,8 @@ not a live check.
 
 from __future__ import annotations
 
+import datetime as dt
+
 import difflib
 import json
 import os
@@ -117,12 +119,46 @@ def parse_details(d: dict) -> Enrichment:
         availability=parse_availability(((d.get("watch/providers") or {}).get("results") or {}).get("US")),
         keywords=[k["name"] for k in (d.get("keywords") or {}).get("keywords", [])],
         poster_path=d.get("poster_path"),
-        meta=people(d),
+        meta={**people(d), **release_info(d)},
     )
 
 
 def enrich(tmdb_id: int) -> Enrichment:
-    return parse_details(_get(f"/movie/{tmdb_id}", append_to_response="videos,watch/providers,keywords,credits"))
+    return parse_details(_get(f"/movie/{tmdb_id}",
+                              append_to_response="videos,watch/providers,keywords,credits,release_dates"))
+
+
+DIGITAL = 4  # TMDB release type: digital (rent/buy at home)
+
+
+def release_info(d: dict) -> dict:
+    """How widely seen a film is (TMDB vote count, our popularity measure) and its US
+    digital release date, from a details response with append_to_response=release_dates."""
+    us = next((r for r in (d.get("release_dates") or {}).get("results", []) if r.get("iso_3166_1") == "US"), {})
+    digital = sorted(x["release_date"][:10] for x in us.get("release_dates", [])
+                     if x.get("type") == DIGITAL and x.get("release_date"))
+    return {"vote_count": d.get("vote_count") or 0, "digital_release": digital[0] if digital else None,
+            "release_checked": dt.date.today().isoformat()}
+
+
+RELEASE_RECHECK_DAYS = 7
+
+
+def release_due(entry: dict, today: str) -> bool:
+    """Look up popularity and the digital date once, then weekly while the digital
+    release is still unknown or ahead (dates get announced and move)."""
+    if "release_checked" not in entry:
+        return True
+    d = entry.get("digital_release")
+    if d and d < today:
+        return False
+    age = (dt.date.fromisoformat(today) - dt.date.fromisoformat(entry["release_checked"])).days
+    return age >= RELEASE_RECHECK_DAYS
+
+
+def release_meta(tmdb_id: int) -> dict:
+    """release_info() for one film: the sync uses it to backfill and to refresh upcoming dates."""
+    return release_info(_get(f"/movie/{tmdb_id}", append_to_response="release_dates"))
 
 
 CAST = 5

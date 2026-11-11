@@ -177,3 +177,36 @@ In Chuck's one-on-one test chat, Linq sent Delo's replies as SMS even though the
 and none of them arrived. A message sent with preferred_service "iMessage" went out as iMessage and was
 delivered, so every send now asks for it. Linq's SDK marks the field deprecated. If Linq drops it, this
 needs another fix.
+
+## New on streaming, coming soon, hidden gems and taste twins (Nov 11)
+
+Chuck found that "3 from the watchlist + 2 wildcards" mostly exposed films they'd seen before they met and
+never logged. He wanted less obvious picks. His standouts (Exotica, A Little Romance, Incendies, Burning,
+Metropolitan, Red Rooms, Yi Yi) have 91 to 3,569 TMDB votes, against about 10,000 for Sicario and 22,000 for
+Parasite. Their TMDB averages are unremarkable (6.6 to 8.1). So popularity is what we take from TMDB, and
+quality comes from the blended score.
+
+A plain kickoff now fills five picks in this order (picker.mix):
+1. **New on your services 🆕** (up to 2): watchlist films that started streaming on a household service in
+   the last 14 days. This is read from the daily availability snapshots, and a film counts only if an earlier
+   snapshot shows it on the watchlist without that service, so it never guesses.
+2. **A taste twin's pick 👯** (1): a film that someone who rates like you loved. If there's no such film, a
+   plain circle wildcard goes last instead. A twin is someone in the circle whose stars agree with the
+   household's on shared films: agreement over (shared films + 3), at least 0.45. On Nov 11 that was 32
+   people. Twins also count extra when ranking every wildcard.
+3. **Hidden gems 💎** (up to 2), from the watchlist or the circle: blended quality of 70 or more from at least
+   two sources, with 50 to 4,000 TMDB votes.
+4. The watchlist by taste fills the rest. At most two picks share a first genre.
+
+**Coming soon:** the intro adds "📅 Coming to rent soon: …" for watchlist films and circle favorites whose US
+digital release (from TMDB) falls in the next 14 days. There's no free source for "arriving on Netflix next
+week", so the digital date is the honest signal.
+
+**Other changes:**
+- Wildcards older than two years with more than 4,000 TMDB votes are skipped, since you've likely seen them
+  without logging them.
+- Circle agreement saturates more slowly: one fan is worth about 3.8 of 17, two 6.7, four 10.7 and eight 14.7.
+- The sync stores each film's TMDB vote count and US digital date, and rechecks the date weekly while it's
+  unknown or still ahead.
+
+Deep cuts from directors you love are parked for later.

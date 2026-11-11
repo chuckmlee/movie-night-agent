@@ -374,8 +374,8 @@ class Flow(unittest.TestCase):
         films = self.state.active["films"]
         self.assertEqual(len(films), 5)
         self.assertEqual(films[0], "delta")  # best taste score, well clear of the jitter
-        self.assertEqual(sum(f.startswith("tmdb-") for f in films), 2)
-        self.assertIn("3 picks from the watchlist and 2 wildcards", self.linq.sent[0])
+        self.assertEqual(sum(f.startswith("tmdb-") for f in films), 1)  # no taste twins or gems in this cache
+        self.assertIn("5 picks: 4 from the watchlist and 1 wildcard 🃏", self.linq.sent[0])
         self.assertTrue(any("🃏 Wildcard" in m for m in self.linq.sent))
         # The daily rebuild drops a wildcard mid-session; the tally still knows it.
         w = next(f for f in films if f.startswith("tmdb-"))

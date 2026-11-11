@@ -2,13 +2,13 @@
 
 The taste profile only learns new ratings at the 5 AM rebuild. Until then, a
 wildcard you rated an hour ago kept coming back (Blue Velvet, Nov 11). This
-reads two cheap, public pages at most every 15 minutes:
-
-- the diary RSS feed (the latest ~50 logs, with TMDB ids), and
-- the first page of films sorted by rating date (ratings made without a log).
-
-Both are fetched with the honest user agent in watchlist.fetch. A failure just
-keeps what was read last time.
+reads the household's diary RSS feed (the latest ~50 logs, with TMDB ids) at
+most every 15 minutes, with the honest user agent in watchlist.fetch. A log
+counts even when it's backdated, since the feed is ordered by when it was
+logged. A rating with no diary entry isn't in the feed, so it waits for the
+5 AM rebuild: the films-by-rating-date page is behind Letterboxd's bot check
+(403, Nov 11), and Delo doesn't work around that. A failure just keeps what
+was read last time.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ import urllib.error
 import xml.etree.ElementTree as ET
 
 from .circle import parse_feed
-from .taste import parse_films_page
 from .watchlist import fetch as lb_fetch
 
 EVERY_SECONDS = 15 * 60
@@ -46,13 +45,6 @@ class FreshSeen:
                 self.titles.add(_key(item["title"], item["year"]))
         except (urllib.error.URLError, ET.ParseError, ValueError) as e:
             self.log(f"seen: diary feed failed: {e!r}")
-        try:
-            films, _ = parse_films_page(self.fetch(f"https://letterboxd.com/{self.user}/films/by/rated-date/"))
-            for f in films:
-                self.slugs.add(f.slug)
-                self.titles.add(_key(f.title, f.year))
-        except (urllib.error.URLError, ValueError, AttributeError) as e:
-            self.log(f"seen: rated films page failed: {e!r}")
 
     def drop(self, cache: dict, keep=()) -> list[str]:
         """Remove films just watched or rated from this poll's cache, except `keep` (the open

@@ -163,3 +163,10 @@ off, which costs about 1/40th as much; the whole backlog comes to roughly a doll
 stay on Opus. Each sync reads at most 2,000 reviews, with 4★+ and hearted reviews first because they're
 the ones quoted under picks. Progress is saved every 10 batches, so a run that stops partway keeps what
 it already paid for.
+
+## A private test chat (Nov 11)
+
+Chuck wanted to try Delo alone, without texting the household group. Delo only watched MNA_CHAT_ID, so a
+one-on-one text went unanswered. Setting MNA_TEST_CHAT_ID makes Delo watch a second chat too. It answers
+there exactly as in the group, but its sessions, vetoes, history and recently offered films are kept in
+data/test/, so testing never changes what the household is offered or who can veto.

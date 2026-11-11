@@ -186,7 +186,10 @@ def agent_loop(chat: str, data: Path, every: float) -> None:
             taste = taste_mod.load(data)
             if taste:
                 cache.update(taste.get("wildcards") or {})
-            quality_mod.annotate(cache, quality_mod.load(data))
+            try:  # scores are a nicety; never let them stop the agent (Nov 11 crash loop)
+                quality_mod.annotate(cache, quality_mod.load(data))
+            except Exception as e:
+                log(f"quality: skipped this poll: {e!r}")
             what = step(linq, chat, state, cache, history, lookup=tmdb_lookup, taste=taste, emojis=emojis, ask=asker)
             STATUS["last_poll"] = dt.datetime.now(dt.timezone.utc).isoformat()
             if what:

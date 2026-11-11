@@ -232,3 +232,30 @@ def line(entry: dict, skip_circle: bool = False) -> str | None:
     if len(out) > HEADER_WIDTH:
         out = re.sub(r"\s*\([^)]*\)$", "", out)
     return out
+
+
+def build(entries: dict, data: Path, log=print) -> dict:
+    """Recompute data/quality.json from the cached ratings and the circle."""
+    path = data / "ratings.json"
+    ratings = json.loads(path.read_text()) if path.exists() else {}
+    q = blend(entries, ratings, circle_mod.scores(circle_mod.load(data)))
+    (data / "quality.json").write_text(json.dumps(q, indent=1))
+    log(f"quality: scored {len(q)} films")
+    return q
+
+
+def load(data: Path) -> dict:
+    path = data / "quality.json"
+    try:
+        return json.loads(path.read_text()) if path.exists() else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def annotate(cache: dict, q: dict) -> None:
+    """Copy each film's score onto its cache entry as entry["quality"] (0-100) for the picker."""
+    for e in cache.values():
+        k = key(e)
+        if k in q:
+            e["quality"] = q[k]["score"]
+            e["quality_info"] = q[k]

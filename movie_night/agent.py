@@ -8,7 +8,9 @@ Flow, per DECISIONS.md:
    The agent only ever speaks after a kickoff like that.
 2. It reads hints from that message, picks 4-5 films from the synced watchlist,
    and sends each as one message: the poster, then a short text.
-3. People react 🥇 🥈 🥉 and veto with 🚫 or 👎. The tally is code (rules.py).
+3. People react 🥇 🥈 🥉 and veto with 🚫 or 👎, or by replying "veto, too bleak".
+   Each veto brings one replacement (which can't be vetoed), chosen to avoid
+   the reason. The tally is code (rules.py).
    A 👀 on a pick asks for its trailer, which Delo sends as a threaded reply.
 4. When everyone has placed 🥇🥈🥉 (or has a 🥇 and stops changing reactions for
    90 seconds), or someone texts "tally" / "done", it announces
@@ -155,13 +157,16 @@ def history_for(sessions: list[dict]) -> History:
     if not sessions:
         return History()
     last = sessions[-1]
-    return History(vetoed_last_session=set(last.get("vetoed_by", [])),
+    vetoed = set(last.get("vetoed_by", []))
+    if last.get("people") and set(last["people"]) <= vetoed:
+        vetoed = set()  # everyone vetoed: everyone paid, so nobody sits out (Chuck, Nov 11)
+    return History(vetoed_last_session=vetoed,
                    missed_top_pick_last_session=set(last.get("missed_top_pick", [])))
 
 
 def build_session(active: dict, cache: dict, msgs: list[dict], people: list[str], hist: History) -> Session:
     films = [Film(s, cache[s]["title"], cache[s].get("letterboxd_rating")) for s in active["films"]]
-    session = Session(films, people, hist)
+    session = Session(films, people, hist, protected=set(active.get("protected", [])))
     # Rebuild from the reactions currently on the messages, so a removed
     # reaction simply disappears. Linq gives no reaction timestamps, so if
     # someone put the same medal on two films, the later film in the list wins.
@@ -171,7 +176,40 @@ def build_session(active: dict, cache: dict, msgs: list[dict], people: list[str]
             continue
         for handle, reaction in linq_format.parse_reactions(m).votes:
             session.apply(ReactionEvent(handle, slug, reaction))
+    for handle, slug in active.get("text_vetoes", []):  # "veto, too bleak" as a reply
+        session.apply(ReactionEvent(handle, slug, Reaction.VETO))
     return session
+
+
+# A reply on a pick that opens like a veto: "veto because no war movies", "nah, too long", "👎 too bleak".
+VETO_TEXT_RE = re.compile(r"^\s*(veto(ed)?|nah|nope|pass|hard pass|skip|not this( one)?|no|👎)\b[\s,:.!-]*", re.I)
+
+
+def _reply_target(m: dict) -> str | None:
+    r = m.get("reply_to")
+    return (r.get("message_id") if isinstance(r, dict) else r) or None
+
+
+def text_veto(m: dict, active: dict, cache: dict) -> tuple[str, str] | None:
+    """(slug, reason) when a message vetoes one pick in words, else None.
+
+    The pick is the one replied to. Without a reply (Linq may not report it),
+    a message that starts with "veto" counts for the pick it names, or else
+    for the most recent pick."""
+    text = _bare(_text(m))
+    hit = VETO_TEXT_RE.match(text)
+    if not hit:
+        return None
+    reason = re.sub(r"^(because|cause|cuz|since)\b\s*", "", text[hit.end():].strip(), flags=re.I).strip(" .!")
+    slug = active["msg_to_slug"].get(_reply_target(m) or "")
+    if not slug and hit.group(1).lower().startswith("veto"):
+        named = [s for s in active["films"] if cache.get(s, {}).get("title", "\0").lower() in text.lower()]
+        slug = named[0] if named else (active["films"][-1] if active["films"] else None)
+        if named:
+            title = cache[slug]["title"]
+            reason = re.sub(re.escape(title), "", reason, flags=re.I).strip(" ,.:-")
+            reason = re.sub(r"^(because|cause|since)\b\s*", "", reason, flags=re.I)
+    return (slug, reason) if slug else None
 
 
 def explain(result, cache: dict, names: dict[str, str]) -> str:
@@ -262,6 +300,64 @@ def ready_to_tally(session: Session, active: dict, now: float) -> bool:
     return everyone_gave_gold(session) and now - active.get("sig_since", now) >= SETTLE_SECONDS
 
 
+REPLACEMENT_LABEL = "🔄 Replaces {title}: no vetoes on this one"
+
+
+def handle_vetoes(linq: Linq, chat_id: str, active: dict, cache: dict, msgs: list[dict],
+                  worded: list[tuple[str, str, str]], hist: History, names: dict[str, str],
+                  replace, emojis, posters) -> list[str]:
+    """Each new veto gets one replacement pick, chosen to avoid the reason given.
+
+    `worded` holds (handle, slug, reason) from replies like "veto, too bleak";
+    👎 reactions come with no reason. `replace(slug, reason)` returns
+    (new slug, wildcard?) or None. Returns the slugs that were replaced."""
+    tv = active.setdefault("text_vetoes", [])
+    for handle, slug, _ in worded:
+        if [handle, slug] not in tv:
+            tv.append([handle, slug])
+    found = [(h, s, r) for h, s, r in worded]
+    for m in msgs:
+        slug = active["msg_to_slug"].get(m["id"])
+        if slug:
+            found += [(h, slug, "") for h, r in linq_format.parse_reactions(m).votes if r is Reaction.VETO]
+    handled, by = active.setdefault("vetoes_handled", []), active.setdefault("veto_by", {})
+    replaced = []
+    for handle, slug, reason in found:
+        key = f"{handle}|{slug}"
+        if key in handled:
+            continue
+        handled.append(key)
+        who, title = names.get(handle, handle), cache.get(slug, {}).get("title", slug)
+        if slug in active.get("protected", []):
+            linq.say(chat_id, f"{who}, {title} is a replacement, so it can't be vetoed.")
+            continue
+        if handle in hist.vetoed_last_session:
+            linq.say(chat_id, f"{who}, no veto tonight: you used one last time.")
+            continue
+        if handle in by and by[handle] != slug:
+            continue  # one veto per session; the tally says which one counted
+        by[handle] = slug
+        got = replace(slug, reason)
+        active["ask"] = (active.get("ask") or "movie night") + \
+            f"\nVetoed {title}: {reason or 'no reason given'}"  # follow-ups keep avoiding it
+        if not got:
+            linq.say(chat_id, f"Swapping out {title}, but nothing else fits. The other picks stand.")
+            continue
+        new, wild = got
+        label = REPLACEMENT_LABEL.format(title=title) + (" · 🃏 not on your watchlist" if wild else "")
+        linq.say(chat_id, f"👎 Swapping out {title}" + (f" ({reason})" if reason else "") + ". Try this instead:")
+        if wild:
+            active.setdefault("entries", {})[new] = cache[new]
+        ensure_poster(cache[new], posters)
+        body = linq_format.pick_message(linq_format.pick_from_cache(
+            cache[new], None, emojis({new: cache[new]}).get(new), label))
+        active["msg_to_slug"][linq.send(chat_id, body)] = new
+        active["films"].append(new)
+        active.setdefault("protected", []).append(new)
+        replaced.append(slug)
+    return replaced
+
+
 def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict],
          names: dict[str, str] | None = None, seed: int | None = None, now: float | None = None,
          lookup=None, taste: dict | None = None, posters=poster_lookup, emojis=emoji_mod.offline,
@@ -282,9 +378,18 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         if m["id"] not in state.seen:
             state.seen.append(m["id"])
 
+    worded, consumed = [], set()
+    if state.active:
+        for m in new:
+            tv = text_veto(m, state.active, cache)
+            if tv:
+                worded.append(((m.get("from_handle") or {}).get("handle", "?"), *tv))
+                consumed.add(m["id"])
     prev_ask = (state.active or {}).get("ask")
     kick, refine = None, False
     for m in reversed(new):
+        if m["id"] in consumed:
+            continue
         if prev_ask and _is_refinement(_text(m)):
             kick, refine = m, True
             break
@@ -315,7 +420,8 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         hist = history_for(history)
         no_veto = [names.get(p, p) for p in people if p in hist.vetoed_last_session]
         intro = (f"🍿 {p.note}: " if p.note else "🍿 ") + \
-            f"{p.summary()}. React 🥇 🥈 🥉, veto with 👎, 👀 for a trailer."
+            f"{p.summary()}. React 🥇 🥈 🥉, 👀 for a trailer. Veto with 👎, or reply \"veto\" and why, " \
+            "and I'll swap in another."
         if no_veto:
             intro += f" ({', '.join(no_veto)}: no veto tonight, you used one last time.)"
         linq.say(chat_id, intro)
@@ -333,7 +439,24 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         return f"kickoff: sent {len(slugs)} picks"
 
     trailers = send_trailers(linq, chat_id, state.active, cache, msgs)
-    session = build_session(state.active, cache, msgs, people, history_for(history))
+    hist = history_for(history)
+    recent = {s for h in history[-RECENT_SESSIONS_EXCLUDED:] for s in h.get("films", [])}
+
+    def replace(slug: str, reason: str):
+        active = state.active
+        kept = [cache[s]["title"] for s in active["films"] if s != slug and s not in active.get("veto_by", {}).values()]
+        why = reason or "no reason given, so infer what they rejected from how it differs from the picks they kept"
+        text = (f"{active.get('ask') or 'movie night'}\nVetoed {cache[slug]['title']} ({why}). "
+                f"Kept: {', '.join(kept)}. Choose its replacement.")
+        rp = plan(text, cache, exclude=recent | set(active["films"]), seed=seed, lookup=lookup, taste=taste,
+                  ask=ask, refine=True)
+        new = next((s for s in rp.slugs if s not in active["films"]), None)
+        return (new, new in rp.wildcards or not cache[new].get("on_watchlist")) if new else None
+
+    swapped = handle_vetoes(linq, chat_id, state.active, cache, msgs, worded, hist, names, replace, emojis, posters)
+    if swapped:
+        return f"veto: replaced {', '.join(swapped)}"
+    session = build_session(state.active, cache, msgs, people, hist)
     asked = any(TALLY_RE.search(_bare(_text(m))) for m in new)
     now = time.time() if now is None else now
     if not (asked or ready_to_tally(session, state.active, now)):
@@ -343,6 +466,7 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
     tops = session.top_picks()
     history.append({
         "date": dt.date.today().isoformat(),
+        "people": sorted(people),
         "films": state.active["films"],
         "winner": result.winner.film_id if result.winner else None,
         "vetoed_by": sorted({p for s in result.scores for p in s.vetoed_by}),

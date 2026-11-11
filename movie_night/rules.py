@@ -7,7 +7,9 @@ Rules (see PLANNING.md):
   * Points: gold = 3, silver = 2, bronze = 1, no reaction = 0.
   * One of each medal per person per session; a second gold moves the first.
   * A veto removes the film. One veto per person per session.
-  * No back-to-back vetoes: someone who vetoed last session cannot veto now.
+  * No back-to-back vetoes: someone who vetoed last session cannot veto now,
+    unless everyone vetoed last session (then nobody owes anything).
+  * A veto brings one replacement pick, and replacements can't be vetoed.
   * Tie-break 1: higher lower-individual-score wins (2+2 beats 3+1).
   * Tie-break 2: the person who didn't get their top pick last time wins.
   * Tie-break 3: higher Letterboxd rating.
@@ -77,13 +79,15 @@ class Result:
 
 
 class Session:
-    def __init__(self, films: list[Film], people: list[str], history: History | None = None):
+    def __init__(self, films: list[Film], people: list[str], history: History | None = None,
+                 protected: set[str] = frozenset()):
         if not films:
             raise ValueError("a session needs at least one film")
         self.films = {f.film_id: f for f in films}
         self.order = [f.film_id for f in films]
         self.people = list(people)
         self.history = history or History()
+        self.protected = set(protected)  # replacement picks: no vetoes
         # person -> reaction -> film_id
         self.state: dict[str, dict[Reaction, str]] = {p: {} for p in people}
         self.rejected: list[tuple[ReactionEvent, str]] = []
@@ -105,6 +109,9 @@ class Session:
             return
         if event.reaction is Reaction.VETO and not self.can_veto(event.person):
             self.rejected.append((event, "vetoed last session; no back-to-back vetoes"))
+            return
+        if event.reaction is Reaction.VETO and event.film_id in self.protected:
+            self.rejected.append((event, "replacement picks can't be vetoed"))
             return
         # One reaction per film per person: a new reaction on the same film
         # replaces whatever they gave it before.

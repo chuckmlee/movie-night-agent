@@ -219,3 +219,10 @@ count, and swaps in another film in the same spirit. This isn't a veto, so it do
 the replacement can still be vetoed or 🙈'd. Delo can't write to Letterboxd, so its reply includes a
 letterboxd.com/tmdb/<id> link for logging the film in one tap. Once it's logged, the taste profile learns
 from it too.
+
+## Wildcards need consensus (Nov 11)
+
+Nosferatu the Vampyre (1979) came up as a wildcard because one person in the circle loved it. A wildcard now
+needs at least two people who loved it (4★+, a heart, or a warm review), or one taste twin. On Nov 11's
+feeds, that leaves about 650 films with two or more fans, plus the films a twin loved. Added Metrograph to the
+circle.

@@ -47,7 +47,8 @@ CIRCLE_WEIGHT = 1.0  # one 5-star fan adds ~2.4; five add ~5.7 (log-scaled in ci
 # Wildcards are films someone in the circle loved (circle.loves) that the
 # household hasn't seen or saved, ranked by how many of them loved it.
 WILDCARD_LOOKUPS = 300  # new TMDB lookups per run; each is cached, so the pool grows day by day
-WILDCARD_MIN_VOTES = 50  # with a single fan, a floor against obscure festival entries
+WILDCARD_MIN_FANS = 2  # people who loved it, unless one of them is a taste twin
+WILDCARD_MIN_VOTES = 50  # with a single (twin) fan, a floor against obscure festival entries
 WILDCARD_MIN_RUNTIME = 60  # no shorts
 AGREE_SCALE = 17.0  # same scale as picker.TASTE_SCALE, so quality blends in the same way
 AVAILABILITY_CHECKS = 200  # watch-provider lookups per run while filling the wildcard pool
@@ -298,7 +299,8 @@ def wildcards(cache: dict, p: Profile, store: dict, lookups: int = WILDCARD_LOOK
     """Films the household hasn't rated or saved that someone they follow loved,
     most-agreed-on first."""
     seen = {e.get("tmdb_id") for e in p.rated.values()} | {e.get("tmdb_id") for e in cache.values()}
-    cands = sorted((t for t, c in p.circle.items() if c.get("fans") and t not in seen),
+    cands = sorted((t for t, c in p.circle.items() if t not in seen and (
+        len(c.get("fans") or []) >= WILDCARD_MIN_FANS or set(c.get("twins") or []) & set(p.twins))),
                    key=lambda t: (-len(p.circle[t]["fans"]), -p.circle[t]["score"]))
     out, fetched = [], 0
     for rid in cands:
@@ -319,11 +321,13 @@ def wildcards(cache: dict, p: Profile, store: dict, lookups: int = WILDCARD_LOOK
         new_release = (e.get("year") or 0) >= dt.date.today().year - 1  # too new for many votes
         if e.get("runtime_min") and e["runtime_min"] < WILDCARD_MIN_RUNTIME:
             continue
+        tw = [w for w in c.get("twins") or [] if w in p.twins]
+        if fans < WILDCARD_MIN_FANS and not tw:
+            continue  # one stranger's 4 stars isn't consensus (Chuck, Nov 11: Nosferatu the Vampyre had one fan)
         if fans < 2 and not new_release and (e.get("vote_count") or 0) < WILDCARD_MIN_VOTES:
             continue
         if (e.get("vote_count") or 0) > WILD_MAX_VOTES and (e.get("year") or 0) < dt.date.today().year - WILD_NEW_YEARS:
             continue  # famous and older: likely seen before you started logging
-        tw = [w for w in c.get("twins") or [] if w in p.twins]
         effective = fans + TWIN_BONUS * sum(p.twins[w]["weight"] for w in tw)
         fit, parts = score(e, p)
         parts.update(fans=fans, twins=tw)

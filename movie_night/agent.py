@@ -190,26 +190,64 @@ def _reply_target(m: dict) -> str | None:
     return (r.get("message_id") if isinstance(r, dict) else r) or None
 
 
-def text_veto(m: dict, active: dict, cache: dict) -> tuple[str, str] | None:
+TITLE_STOP = {"the", "a", "an", "of", "and", "in", "on", "with", "to", "me", "my", "for", "at"}
+
+
+def _words(t: str) -> list[str]:
+    return re.findall(r"[a-z0-9']+", t.lower())
+
+
+def find_named_pick(text: str, films: list[str], cache: dict) -> tuple[str, str] | None:
+    """(slug, the words that named it): "fire walk with me" names "Twin Peaks: Fire Walk with Me".
+
+    A full title or a part of it after a colon or dash counts; so does sharing
+    two or more title words, or one long one ("lieutenant")."""
+    said = " " + " ".join(_words(text)) + " "
+    best = None
+    for slug in films:
+        title = cache.get(slug, {}).get("title") or ""
+        for piece in [title, *re.split(r"\s*[:\u2013\u2014-]\s+", title)]:
+            w = " ".join(_words(piece))
+            if len(w) >= 3 and f" {w} " in said and (best is None or len(w) > len(best[1])):
+                best = (slug, w)
+    if best:
+        return best
+    scored = []
+    for slug in films:
+        key = [w for w in _words(cache.get(slug, {}).get("title") or "") if w not in TITLE_STOP]
+        hits = [w for w in key if f" {w} " in said]
+        if hits and (len(hits) >= 2 or len(key) == 1 or len(hits[0]) >= 6):
+            scored.append((len(hits) / len(key), len(hits), slug, hits))
+    scored.sort(reverse=True)
+    if scored and (len(scored) == 1 or scored[0][:2] != scored[1][:2]):
+        return scored[0][2], " ".join(scored[0][3])
+    return None
+
+
+def text_veto(m: dict, active: dict, cache: dict) -> tuple[str | None, str] | None:
     """(slug, reason) when a message vetoes one pick in words, else None.
 
-    The pick is the one replied to. Without a reply (Linq may not report it),
-    a message that starts with "veto" counts for the pick it names, or else
-    for the most recent pick."""
+    The pick is the one replied to (Linq reports reply_to on swipe replies,
+    confirmed Nov 11). Otherwise a message that starts with "veto" counts for
+    the pick it names; if it names none, slug is None and the caller asks
+    which one rather than guessing (Nov 11: a guess vetoed the wrong film)."""
     text = _bare(_text(m))
     hit = VETO_TEXT_RE.match(text)
     if not hit:
         return None
-    reason = re.sub(r"^(because|cause|cuz|since)\b\s*", "", text[hit.end():].strip(), flags=re.I).strip(" .!")
+    reason = text[hit.end():].strip()
     slug = active["msg_to_slug"].get(_reply_target(m) or "")
-    if not slug and hit.group(1).lower().startswith("veto"):
-        named = [s for s in active["films"] if cache.get(s, {}).get("title", "\0").lower() in text.lower()]
-        slug = named[0] if named else (active["films"][-1] if active["films"] else None)
-        if named:
-            title = cache[slug]["title"]
-            reason = re.sub(re.escape(title), "", reason, flags=re.I).strip(" ,.:-")
-            reason = re.sub(r"^(because|cause|since)\b\s*", "", reason, flags=re.I)
-    return (slug, reason) if slug else None
+    if not slug:
+        if not hit.group(1).lower().startswith("veto"):
+            return None
+        named = find_named_pick(reason, active["films"], cache)
+        if not named:
+            return None, reason
+        slug, words = named
+        reason = " ".join(_words(reason))  # drop the film's name from the reason
+        reason = " ".join(re.sub(rf"\b{re.escape(words)}\b", "", reason).split())
+    reason = re.sub(r"^(because|cause|cuz|since)\b\s*", "", reason.strip(" ,.:;-!"), flags=re.I).strip(" ,.:;-!")
+    return slug, reason
 
 
 def explain(result, cache: dict, names: dict[str, str]) -> str:
@@ -383,8 +421,11 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         for m in new:
             tv = text_veto(m, state.active, cache)
             if tv:
-                worded.append(((m.get("from_handle") or {}).get("handle", "?"), *tv))
                 consumed.add(m["id"])
+                if tv[0] is None:
+                    linq.say(chat_id, "Which one? Swipe to reply on the pick you're vetoing, or name it.")
+                else:
+                    worded.append(((m.get("from_handle") or {}).get("handle", "?"), *tv))
     prev_ask = (state.active or {}).get("ask")
     kick, refine = None, False
     for m in reversed(new):

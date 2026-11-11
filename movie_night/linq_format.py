@@ -37,6 +37,7 @@ class Pick:
 
 POSTER_BASE = "https://image.tmdb.org/t/p/w500"
 TRAILER_EMOJI = "👀"
+SEEN_EMOJI = "🙈"  # "seen it": never offer this film again (Nov 11)
 
 
 def poster_url(entry: dict) -> str | None:
@@ -135,6 +136,13 @@ def wants_trailer(message: dict) -> bool:
                for part in message.get("parts") or [] for r in part.get("reactions") or [])
 
 
+def seen_by(message: dict) -> list[str]:
+    """Handles of people (not Delo) who reacted 🙈 on this message."""
+    return [(r.get("handle") or {}).get("handle", "?") for part in message.get("parts") or []
+            for r in part.get("reactions") or []
+            if r.get("type") == "custom" and r.get("custom_emoji") == SEEN_EMOJI and not r.get("is_me")]
+
+
 CUSTOM = {"🥇": Reaction.GOLD, "🥈": Reaction.SILVER, "🥉": Reaction.BRONZE, "🚫": Reaction.VETO}
 TAPBACK = {"dislike": Reaction.VETO}  # 👎; confirmed live on Nov 10
 
@@ -158,7 +166,7 @@ def parse_reactions(message: dict) -> ParsedReactions:
                 emoji = r.get("custom_emoji") or ""
                 if emoji in CUSTOM:
                     res.votes.append((handle, CUSTOM[emoji]))
-                elif emoji == TRAILER_EMOJI:
+                elif emoji in (TRAILER_EMOJI, SEEN_EMOJI):
                     continue  # a request, not a vote
                 else:
                     res.ignored.append((handle, emoji or "custom"))

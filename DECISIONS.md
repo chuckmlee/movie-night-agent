@@ -210,3 +210,12 @@ week", so the digital date is the honest signal.
   unknown or still ahead.
 
 Deep cuts from directors you love are parked for later.
+
+## 🙈 "seen it" (Nov 11)
+
+A 🙈 on a pick means you've seen the film. Delo remembers it in data/seen-it.json, which every chat shares,
+so the film is never offered again. It also takes the film out of tonight's picks, so medals on it no longer
+count, and swaps in another film in the same spirit. This isn't a veto, so it doesn't use anyone's veto, and
+the replacement can still be vetoed or 🙈'd. Delo can't write to Letterboxd, so its reply includes a
+letterboxd.com/tmdb/<id> link for logging the film in one tap. Once it's logged, the taste profile learns
+from it too.

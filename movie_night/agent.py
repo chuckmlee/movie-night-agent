@@ -12,6 +12,7 @@ Flow, per DECISIONS.md:
    Each veto brings one replacement (which can't be vetoed), chosen to avoid
    the reason. The tally is code (rules.py).
    A 👀 on a pick asks for its trailer, which Delo sends as a threaded reply.
+   A 🙈 on a pick means "seen it": never offered again, and another film takes its place.
 4. When everyone has placed 🥇🥈🥉 (or has a 🥇 and stops changing reactions for
    90 seconds), or someone texts "tally" / "done", it announces
    the winner and why. It records vetoes and top picks for next time.
@@ -192,11 +193,13 @@ def build_session(active: dict, cache: dict, msgs: list[dict], people: list[str]
     # someone put the same medal on two films, the later film in the list wins.
     for m in msgs:
         slug = active["msg_to_slug"].get(m["id"])
-        if not slug:
+        if not slug or slug not in active["films"]:  # e.g. taken out with 🙈
             continue
         for handle, reaction in linq_format.parse_reactions(m).votes:
             session.apply(ReactionEvent(handle, slug, reaction))
     for handle, slug in active.get("text_vetoes", []):  # "veto, too bleak" as a reply
+        if slug not in active["films"]:
+            continue
         session.apply(ReactionEvent(handle, slug, Reaction.VETO))
     return session
 
@@ -416,10 +419,53 @@ def handle_vetoes(linq: Linq, chat_id: str, active: dict, cache: dict, msgs: lis
     return replaced
 
 
+SEEN_LABEL = "🔄 Replaces {title}, which you've seen"
+
+
+def handle_seen(linq: Linq, chat_id: str, active: dict, cache: dict, msgs: list[dict], names: dict[str, str],
+                seen_it: dict, replace, emojis, posters) -> list[str]:
+    """🙈 on a pick: remember the film as seen (never offered again), take it out of
+    tonight's picks, link it on Letterboxd for logging, and swap in another.
+    Not a veto, so it doesn't use anyone's veto."""
+    out = []
+    for m in msgs:
+        slug = active["msg_to_slug"].get(m["id"])
+        who = linq_format.seen_by(m)
+        if not slug or not who or slug not in active["films"]:
+            continue
+        e = cache.get(slug, {})
+        title = e.get("title", slug)
+        if e.get("tmdb_id"):
+            seen_it[str(e["tmdb_id"])] = {"title": title, "year": e.get("year"), "by": who[0],
+                                          "at": dt.date.today().isoformat()}
+        active["films"].remove(slug)
+        active["ask"] = (active.get("ask") or "movie night") + f"\nAlready seen: {title}"
+        log_link = f" Log it: https://letterboxd.com/tmdb/{e['tmdb_id']}/" if e.get("tmdb_id") else ""
+        got = replace(slug, "")
+        if not got:
+            linq.say(chat_id, f"🙈 Noted, {names.get(who[0], who[0])} has seen {title}, so I won't suggest it again."
+                              f"{log_link} Nothing else fits, so the other picks stand.")
+            out.append(slug)
+            continue
+        new, wild = got
+        linq.say(chat_id, f"🙈 Noted, {names.get(who[0], who[0])} has seen {title}, so I won't suggest it again."
+                          f"{log_link} Here's another:")
+        if wild:
+            active.setdefault("entries", {})[new] = cache[new]
+        ensure_poster(cache[new], posters)
+        label = SEEN_LABEL.format(title=title) + (" · 🃏 not on your watchlist" if wild else "")
+        body = linq_format.pick_message(linq_format.pick_from_cache(
+            cache[new], None, emojis({new: cache[new]}).get(new), label))
+        active["msg_to_slug"][linq.send(chat_id, body)] = new
+        active["films"].append(new)
+        out.append(slug)
+    return out
+
+
 def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict],
          names: dict[str, str] | None = None, seed: int | None = None, now: float | None = None,
          lookup=None, taste: dict | None = None, posters=poster_lookup, emojis=emoji_mod.offline,
-         ask=None) -> str | None:
+         ask=None, seen_it: dict | None = None) -> str | None:
     """One poll. Returns what happened, for logging. `lookup` resolves "like X" titles (tmdb.search);
     `ask` (movie_night.ask.Asker) lets Claude choose picks for asks with nuance."""
     names = names or {}
@@ -485,8 +531,8 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         hist = history_for(history)
         no_veto = [names.get(p, p) for p in people if p in hist.vetoed_last_session]
         intro = (f"🍿 {p.note}: " if p.note else "🍿 ") + \
-            f"{p.summary()}. React 🥇 🥈 🥉, 👀 for a trailer. Veto with 👎, or reply \"veto\" and why, " \
-            "and I'll swap in another."
+            f"{p.summary()}. React 🥇 🥈 🥉, 👀 for a trailer, 🙈 if you've seen it. Veto with 👎, or reply " \
+            "\"veto\" and why, and I'll swap in another."
         if no_veto:
             intro += f" ({', '.join(no_veto)}: no veto tonight, you used one last time.)"
         if p.extra:
@@ -511,20 +557,30 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
     recent = {s for h in history[-RECENT_SESSIONS_EXCLUDED:] for s in h.get("films", [])}
     shown = recently_shown(state)
 
-    def replace(slug: str, reason: str):
+    def replace(slug: str, reason: str, seen: bool = False):
         active = state.active
         kept = [cache[s]["title"] for s in active["films"] if s != slug and s not in active.get("veto_by", {}).values()]
-        why = reason or "no reason given, so infer what they rejected from how it differs from the picks they kept"
-        text = (f"{active.get('ask') or 'movie night'}\nVetoed {cache[slug]['title']} ({why}). "
-                f"Kept: {', '.join(kept)}. Choose its replacement.")
-        rp = plan(text, cache, exclude=recent | shown | set(active["films"]), seed=seed, lookup=lookup,
+        if seen:
+            text = (f"{active.get('ask') or 'movie night'}\nThey've already seen {cache[slug]['title']}. "
+                    f"Kept: {', '.join(kept)}. Choose a replacement in the same spirit.")
+        else:
+            why = reason or "no reason given, so infer what they rejected from how it differs from the picks they kept"
+            text = (f"{active.get('ask') or 'movie night'}\nVetoed {cache[slug]['title']} ({why}). "
+                    f"Kept: {', '.join(kept)}. Choose its replacement.")
+        taken = set(active["films"]) | {slug} | set(active["msg_to_slug"].values())
+        rp = plan(text, cache, exclude=recent | shown | taken, seed=seed, lookup=lookup,
                   taste=taste, ask=ask, refine=True)
         if not rp.slugs and shown:
-            rp = plan(text, cache, exclude=recent | set(active["films"]), seed=seed, lookup=lookup, taste=taste,
+            rp = plan(text, cache, exclude=recent | taken, seed=seed, lookup=lookup, taste=taste,
                       ask=ask, refine=True)
         new = next((s for s in rp.slugs if s not in active["films"]), None)
         return (new, new in rp.wildcards or not cache[new].get("on_watchlist")) if new else None
 
+    seen_out = handle_seen(linq, chat_id, state.active, cache, msgs, names, {} if seen_it is None else seen_it,
+                           lambda slug, reason: replace(slug, reason, seen=True), emojis, posters)
+    if seen_out:
+        mark_shown(state)
+        return f"seen: replaced {', '.join(seen_out)}"
     swapped = handle_vetoes(linq, chat_id, state.active, cache, msgs, worded, hist, names, replace, emojis, posters)
     if swapped:
         mark_shown(state)

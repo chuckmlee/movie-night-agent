@@ -178,6 +178,12 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
     like = search.find_like(text)
     seed_film = lookup(*like) if (like and lookup) else None
     topics = {} if seed_film else search.find_topics(text, vocab)
+    wanted, avoided = search.find_people(text, cache)
+    if avoided:  # "no David Lynch tonight"
+        exclude = set(exclude) | {s for s, e in cache.items()
+                                  if set(avoided) & set((e.get("directors") or []) + (e.get("cast") or []))}
+    if wanted:  # a name isn't a topic: "lynch" shouldn't also match keywords
+        topics = {k: v for k, v in topics.items() if not any(k in w.lower() for w in wanted)}
 
     if ask is not None:
         from .ask import is_nuanced
@@ -210,6 +216,22 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
                     reasons[slug] = "Shares " + ", ".join(bits) + f" with {seed_film['title']}"
             label = seed_film["title"] + (f" ({seed_film['year']})" if seed_film.get("year") else "")
             return Plan([t[3] for t in top], reasons, f"More like {label}")
+        if wanted and not seed_film:
+            rng = random.Random(seed)
+            hits = []
+            for slug, e in cache.items():
+                if slug in exclude or not eligible(e, h):
+                    continue
+                credits = search.credits_for(e, wanted)
+                if credits:
+                    included = bool((e.get("availability") or {}).get("included"))
+                    fit = with_quality(scores[slug][0], e) if slug in scores else \
+                        with_quality(e.get("letterboxd_rating") or 3.0, e, 5.0)
+                    on_topic = bool(search.matches_topics(e, topics)) if topics else True
+                    hits.append((included, on_topic, len(credits), fit + rng.uniform(0, 1), slug, credits))
+            hits.sort(reverse=True)
+            top = hits[:n]
+            return Plan([t[4] for t in top], {t[4]: ", ".join(t[5]) for t in top}, " / ".join(wanted))
         if topics:
             rng = random.Random(seed)
             hits = []

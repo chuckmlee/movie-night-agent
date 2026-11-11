@@ -112,6 +112,46 @@ def find_topics(text: str, vocab: Counter) -> dict[str, list[str]]:
     return topics
 
 
+NEGATE_RE = r"\b(?:no|not|without|nothing\s+(?:by|from|with)|skip|except)\s+(?:\w+\s+){0,2}$"
+
+
+def people_index(cache: dict) -> dict[str, str]:
+    """Lowercase name -> full name, for every director and top-billed actor in the cache,
+    plus surnames that belong to only one of them ("lynch" -> "David Lynch")."""
+    full, by_last = {}, {}
+    for e in cache.values():
+        for name in (e.get("directors") or []) + (e.get("cast") or []):
+            full[name.lower()] = name
+            last = name.split()[-1].lower()
+            if len(last) >= 4 and last not in STOP:
+                by_last.setdefault(last, set()).add(name)
+    index = dict(full)
+    for last, names in by_last.items():
+        if len(names) == 1:
+            index.setdefault(last, next(iter(names)))
+    return index
+
+
+def find_people(text: str, cache: dict) -> tuple[list[str], list[str]]:
+    """Directors and actors the ask names: (wanted, avoided). "Lynch movies" wants David Lynch;
+    "no David Lynch tonight" avoids him. Full names win over a bare surname."""
+    t = " " + " ".join(re.findall(r"[a-z0-9'\-]+", text.lower())) + " "
+    wanted, avoided, taken = [], [], []
+    for key, name in sorted(people_index(cache).items(), key=lambda kv: -len(kv[0])):
+        m = re.search(rf"(?<=\s){re.escape(key)}(?:'s)?(?=\s)", t)
+        if not m or name in wanted + avoided or any(m.start() >= a and m.end() <= b for a, b in taken):
+            continue
+        taken.append((m.start(), m.end()))
+        (avoided if re.search(NEGATE_RE, t[:m.start()]) else wanted).append(name)
+    return wanted, avoided
+
+
+def credits_for(entry: dict, names: list[str]) -> list[str]:
+    """How the film relates to the named people: ["Directed by David Lynch", "With Laura Dern"]."""
+    out = [f"Directed by {n}" for n in names if n in (entry.get("directors") or [])]
+    return out + [f"With {n}" for n in names if n in (entry.get("cast") or [])]
+
+
 def matches_topics(entry: dict, topics: dict[str, list[str]]) -> list[str]:
     """Which of the requested topics this film matches. Any one is enough
     ("heist or noir"); films matching more of them rank higher."""

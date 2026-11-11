@@ -115,3 +115,13 @@ friend's quote in italics under it. Only wildcards get the italic 🃏 label, si
 watchlist picks. The score line stays on one line (38 characters or fewer), so the highlight is
 "critics' favorite" with no figure. When the pick already quotes someone in the circle, the highlight
 skips the circle so it isn't said twice.
+
+## Directors, cast, country and language (Nov 11)
+
+The sync stores TMDB credits for each film: its director(s), the top 5 cast, its production countries and
+its original language. Films cached earlier get them in the next sync. Claude sees them when it picks, so
+"no David Lynch" and "something Korean" work. Without Claude, a name in an ask matches as well: "lynch
+movies" by director, "something with Cate Blanchett" by cast. A surname counts on its own only when it
+belongs to a single person in the cache. "no/not/without <name>" removes that person's films from
+every kind of pick, including veto replacements. More specific genres come from TMDB tags for now, and
+Letterboxd nanogenres are a possible next step.

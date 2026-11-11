@@ -69,7 +69,7 @@ follow-ups, they narrow or change the first ask, and the latest wins where they 
 films when two fit about equally. Use only ids from the list.
 
 For each pick write `why`: one short line (at most 15 words) on how it answers the ask, in plain
-words a friend would use. Ground it in the synopsis and tags given; don't claim things they don't
+words a friend would use. Ground it in the synopsis, tags and credits given; don't claim things they don't
 support, and don't give away twists or endings.
 
 Also write `note`: the whole ask, follow-ups included, restated in at most 8 words, like "Like The Devils, less shocking"."""
@@ -81,6 +81,8 @@ def _line(slug: str, e: dict) -> str:
         "title": e.get("title"), "year": e.get("year"),
         "list": "watchlist" if e.get("on_watchlist") else "wildcard",
         "runtime": e.get("runtime_min"), "genres": (e.get("genres") or [])[:3],
+        "director": e.get("directors") or None, "cast": (e.get("cast") or [])[:3] or None,
+        "country": (e.get("countries") or [])[:2] or None, "language": e.get("language"),
         "tags": [k for k in (e.get("keywords") or [])][:12],
         "synopsis": (e.get("overview") or "")[:350],
     }, ensure_ascii=False)
@@ -108,6 +110,7 @@ class Asker:
         if seed:
             seed_block = ("\nThe film they named, for reference:\n<named>" + json.dumps({
                 "title": seed.get("title"), "year": seed.get("year"), "genres": seed.get("genres"),
+                "director": seed.get("directors"), "cast": (seed.get("cast") or [])[:3],
                 "tags": (seed.get("keywords") or [])[:15], "synopsis": (seed.get("overview") or "")[:500],
             }, ensure_ascii=False) + "</named>\n")
         prompt = PROMPT.format(ask=ask, seed=seed_block, n=min(PICKS, len(pool)),

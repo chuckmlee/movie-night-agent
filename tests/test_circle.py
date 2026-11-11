@@ -1,3 +1,4 @@
+import re
 import json
 import unittest
 from types import SimpleNamespace
@@ -52,7 +53,7 @@ class Circle(unittest.TestCase):
         self.assertEqual(n, 1)  # bob's one-word entry is too short to read
         call = FakeClient("x")
         extract({"reviews": {"a": {**item, "extract": None}}}, client=call)
-        self.assertEqual(call.calls[0]["model"], "claude-opus-5-5")
+        self.assertEqual(call.calls[0]["model"], "claude-haiku-5-5")
         self.assertEqual(call.calls[0]["output_config"]["format"]["type"], "json_schema")
         f = scores(store)[7340]
         self.assertAlmostEqual(f["score"], 0.9 + 0.25 - 0.5)  # ann's words plus her heart; bob's 2 stars
@@ -64,6 +65,45 @@ class Circle(unittest.TestCase):
         extract(store, client=FakeClient("Best horror film ever made."))
         self.assertIsNone(store["reviews"][item["id"]]["extract"]["quote"])
         self.assertEqual(voice(scores(store)[7340]), "ann (5★) loved it")
+
+
+class Budget(unittest.TestCase):
+    def test_capped_and_saved_as_it_goes(self):
+        from movie_night import circle
+
+        class Fake:
+            calls = 0
+
+            class beta:
+                class messages:
+                    @staticmethod
+                    def create(**kw):
+                        Fake.calls += 1
+                        ids = re.findall(r'<review id="([^"]+)"', kw["messages"][0]["content"])
+                        body = json.dumps({"reviews": [{"id": i, "sentiment": 0.5, "loved": [], "disliked": [],
+                                                        "quote": ""} for i in ids]})
+                        return type("R", (), {"stop_reason": "end_turn",
+                                              "content": [type("B", (), {"type": "text", "text": body})()]})()
+
+        store = {"reviews": {str(n): {"id": str(n), "who": "a", "tmdb_id": n, "title": "T", "text": "x" * 100,
+                                      "stars": 5.0 if n == 99 else 3.0} for n in range(100)}}
+        saves = []
+        done = circle.extract(store, client=Fake, log=lambda m: None, limit=88, save=lambda: saves.append(1))
+        self.assertEqual((done, Fake.calls, len(saves)), (88, 11, 1))
+        self.assertIsNotNone(store["reviews"]["99"]["extract"])  # the 5-star review went first
+
+
+class Loves(unittest.TestCase):
+    def test_wildcard_bar(self):
+        from movie_night.circle import loves, scores
+        self.assertTrue(loves({"stars": 4.0}))
+        self.assertTrue(loves({"stars": 3.0, "liked": True}))
+        self.assertTrue(loves({"extract": {"sentiment": 0.8}}))
+        self.assertFalse(loves({"stars": 3.5}))
+        self.assertFalse(loves({"stars": 4.5, "extract": {"sentiment": -0.4}}))  # the words win
+        store = {"reviews": {"a": {"who": "ann", "tmdb_id": 5, "title": "X", "stars": 4.5},
+                             "b": {"who": "bob", "tmdb_id": 5, "title": "X", "stars": 2.0}}}
+        self.assertEqual(scores(store)[5]["fans"], ["ann"])
 
 
 if __name__ == "__main__":

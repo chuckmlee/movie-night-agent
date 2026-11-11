@@ -11,7 +11,7 @@
 - Scores films by how much their TMDB keywords and genres overlap what the
   household rated highly, minus what it rated low, plus a boost when TMDB
   recommends them from a film the household loved.
-- Ranks the watchlist, and finds wildcards: films recommended from loved films
+- Ranks the watchlist, and finds wildcards: unseen films someone in the circle loved
   that are neither rated nor on the watchlist.
 
 The scoring is a few lines of arithmetic on purpose, so every pick can say why.
@@ -44,10 +44,14 @@ GENRE_WEIGHT = 1.5
 REC_WEIGHT = 1.0
 REC_CAP = 3
 CIRCLE_WEIGHT = 1.0  # one 5-star fan adds ~2.4; five add ~5.7 (log-scaled in circle.circle_boost)
-WILDCARD_CIRCLE_MIN = 1.0  # circle score that makes an unseen film a wildcard candidate
-WILDCARD_LOOKUPS = 250  # TMDB detail calls for wildcard candidates (each cached after the first run)
-WILDCARD_MIN_VOTES = 300
-WILDCARD_MIN_AVERAGE = 6.8
+# Wildcards are films someone in the circle loved (circle.loves) that the
+# household hasn't seen or saved, ranked by how many of them loved it.
+WILDCARD_LOOKUPS = 300  # new TMDB lookups per run; each is cached, so the pool grows day by day
+WILDCARD_MIN_VOTES = 50  # with a single fan, a floor against obscure festival entries
+WILDCARD_MIN_RUNTIME = 60  # no shorts
+AGREE_SCALE = 17.0  # same scale as picker.TASTE_SCALE, so quality blends in the same way
+AVAILABILITY_CHECKS = 200  # watch-provider lookups per run while filling the wildcard pool
+FIT_NUDGE = 0.2  # the household's taste fit only breaks ties between equally loved films
 
 
 @dataclass
@@ -278,30 +282,42 @@ def rank(cache: dict, p: Profile) -> list[Scored]:
     return sorted(out, key=lambda x: -x.score)
 
 
+def agreement(fans: int) -> float:
+    """Diminishing returns on the circle: one fan ~6.7, two ~10.7, three ~13.2, five ~15.6 (of 17)."""
+    return AGREE_SCALE * (1 - math.exp(-fans / 2))
+
+
 def wildcards(cache: dict, p: Profile, store: dict, lookups: int = WILDCARD_LOOKUPS, log=print) -> list[Scored]:
-    """Films the household hasn't rated or saved: recommended from loved films, or loved by the circle."""
+    """Films the household hasn't rated or saved that someone they follow loved,
+    most-agreed-on first."""
     seen = {e.get("tmdb_id") for e in p.rated.values()} | {e.get("tmdb_id") for e in cache.values()}
-    circle = sorted((t for t, c in p.circle.items() if c["score"] >= WILDCARD_CIRCLE_MIN and t not in seen),
-                    key=lambda t: -p.circle[t]["score"])
-    recs = sorted((rid for rid in p.recommended_by if rid not in seen), key=lambda r: -len(p.recommended_by[r]))
-    cands = list(dict.fromkeys(circle + recs))
-    out = []
-    for rid in cands[:lookups + len(circle)]:
+    cands = sorted((t for t, c in p.circle.items() if c.get("fans") and t not in seen),
+                   key=lambda t: (-len(p.circle[t]["fans"]), -p.circle[t]["score"]))
+    out, fetched = [], 0
+    for rid in cands:
         key = str(rid)
         if key not in store:
+            if fetched >= lookups:
+                continue  # tomorrow's run picks it up
             try:
                 store[key] = _details(rid)
             except urllib.error.URLError as err:
                 log(f"  tmdb failed for wildcard {rid}: {err}")
                 continue
+            fetched += 1
             time.sleep(0.05)
         e = store[key]
+        fans = len(p.circle[rid]["fans"])
         new_release = (e.get("year") or 0) >= dt.date.today().year - 1  # too new for many votes
-        if not (rid in p.circle and new_release) and (
-                (e.get("vote_count") or 0) < WILDCARD_MIN_VOTES or (e.get("vote_average") or 0) < WILDCARD_MIN_AVERAGE):
+        if e.get("runtime_min") and e["runtime_min"] < WILDCARD_MIN_RUNTIME:
             continue
-        s, parts = score(e, p)
-        out.append(Scored(key, s, reason(e, p, parts), parts))
+        if fans < 2 and not new_release and (e.get("vote_count") or 0) < WILDCARD_MIN_VOTES:
+            continue
+        fit, parts = score(e, p)
+        parts["fans"] = fans
+        out.append(Scored(key, agreement(fans) + FIT_NUDGE * fit, reason(e, p, parts), parts))
+    if fetched:
+        log(f"taste: looked up {fetched} circle-loved films, {sum(1 for t in cands if str(t) not in store)} left")
     return sorted(out, key=lambda x: -x.score)
 
 
@@ -329,10 +345,10 @@ def report(cache: dict, p: Profile, ranked: list[Scored], wild: list[Scored], st
         e = cache[s.slug]
         lines.append(f"| {e['title']} ({e.get('year')}) | {s.score:.1f} | genres {s.parts['genres']:+.2f} |")
     lines += ["", "## Top 10 wildcards (not rated, not on the watchlist)", "",
-              "| # | Film | Where | TMDB | Score | Why |", "|---|---|---|---|---|---|"]
+              "| # | Film | Where | Circle fans | Score | Why |", "|---|---|---|---|---|---|"]
     for i, s in enumerate(wild[:10], 1):
         e = store[s.slug]
-        lines.append(f"| {i} | {e['title']} ({e.get('year')}) | {_where(e)} | {e['vote_average']:.1f} | "
+        lines.append(f"| {i} | {e['title']} ({e.get('year')}) | {_where(e)} | {s.parts.get('fans', 0)} | "
                      f"{s.score:.1f} | {s.reason} |")
     return "\n".join(lines) + "\n"
 
@@ -364,17 +380,25 @@ def build(username: str, data: Path, export: Path | None = None, refresh: bool =
     p = build_profile(store)
     p.circle = circle_mod.scores(circle_mod.load(data))
     wstore = json.loads(wild_path.read_text()) if wild_path.exists() else {}
-    wild = wildcards(cache, p, wstore, log=log)[:keep_wild]
     today = dt.date.today().isoformat()
-    for w in wild:  # availability changes; the rest of a film's details don't
+    # Keep the best-loved films you can actually watch tonight: the circle's
+    # favorites are often festival films that aren't streaming yet.
+    wild, checked = [], 0
+    for w in wildcards(cache, p, wstore, log=log):
+        if len(wild) >= keep_wild or checked >= AVAILABILITY_CHECKS:
+            break
         e = wstore[w.slug]
-        if e.get("availability_checked") != today:
+        if e.get("availability_checked") != today:  # availability changes; the rest of a film's details don't
             try:
                 us = tmdb._get(f"/movie/{e['tmdb_id']}/watch/providers").get("results", {}).get("US")
                 e["availability"], e["availability_checked"] = asdict(tmdb.parse_availability(us)), today
             except urllib.error.URLError as err:
                 log(f"  availability failed for wildcard {e['title']}: {err}")
+            checked += 1
             time.sleep(0.05)
+        a = e.get("availability") or {}
+        if a.get("included") or a.get("rent"):
+            wild.append(w)
     wild_path.write_text(json.dumps(wstore, indent=1, ensure_ascii=False))
     out = {
         "built": dt.datetime.now(dt.timezone.utc).isoformat(),

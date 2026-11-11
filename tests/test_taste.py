@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from movie_night.taste import build_profile, parse_films_page, rank, reason, score, weight
 
@@ -72,6 +73,71 @@ class Profile(unittest.TestCase):
         self.assertGreater(after, before)
         r = pick_reason(Scored("musical", after, reason(CACHE["musical"], p, parts), parts), CACHE["musical"], p)
         self.assertIn("💬 ann (5★) and 1 more you follow: “Pure joy.”", r)
+
+
+class CircleWildcards(unittest.TestCase):
+    """Wildcards come only from films someone in the circle loved, most-agreed-on first."""
+
+    def setUp(self):
+        from movie_night.taste import agreement, wildcards
+        self.agreement, self.wildcards = agreement, wildcards
+        self.p = build_profile(RATED)
+        fan = lambda *who: {"score": float(len(who)), "fans": list(who), "people": [], "best": None}  # noqa: E731
+        self.p.circle = {
+            20: fan("ann"), 21: fan("ann", "bob", "cy"), 22: fan(),  # 22: watched, nobody loved it
+            2: fan("ann", "bob"),  # Se7en: the household already rated it
+            23: fan("dee"), 24: fan("ann", "bob"),  # 23: obscure, one fan; 24: a short
+        }
+        base = {"keywords": [], "genres": ["Drama"], "runtime_min": 100, "vote_count": 400, "year": 1990}
+        self.store = {"20": {**base, "tmdb_id": 20}, "21": {**base, "tmdb_id": 21}, "22": {**base, "tmdb_id": 22},
+                      "23": {**base, "tmdb_id": 23, "vote_count": 12},
+                      "24": {**base, "tmdb_id": 24, "runtime_min": 14}}
+
+    def test_only_circle_loved_unseen_features(self):
+        wild = self.wildcards(CACHE, self.p, self.store, log=lambda m: None)
+        self.assertEqual([w.slug for w in wild], ["21", "20"])  # three fans beat one
+        self.assertEqual(wild[0].parts["fans"], 3)
+
+    def test_recommendations_alone_dont_make_a_wildcard(self):
+        self.p.circle = {}
+        self.assertEqual(self.wildcards(CACHE, self.p, self.store, log=lambda m: None), [])
+
+    def test_lookups_are_budgeted_and_cached(self):
+        calls = []
+        import movie_night.taste as t
+        real, t._details = t._details, lambda rid: calls.append(rid) or {"tmdb_id": rid, "runtime_min": 90,
+                                                                         "vote_count": 500, "keywords": [], "genres": []}
+        try:
+            store = {}
+            self.wildcards(CACHE, self.p, store, lookups=2, log=lambda m: None)
+            self.assertEqual(calls, [21, 24])  # most fans first; the rest wait for tomorrow
+        finally:
+            t._details = real
+
+    def test_build_keeps_only_watchable(self):
+        import json, tempfile
+        import movie_night.circle as c
+        import movie_night.taste as t
+        from movie_night import tmdb
+        streams = {"results": {"US": {"flatrate": [{"provider_id": 8, "provider_name": "Netflix"}]}}}
+        real = (tmdb._get, c.scores, c.load)
+        tmdb._get = lambda path, **kw: streams if "/21/" in path else {"results": {}}
+        c.scores, c.load = (lambda store: self.p.circle), (lambda data: {})
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                d = Path(d)
+                (d / "films.json").write_text(json.dumps(CACHE))
+                (d / "rated.json").write_text(json.dumps(RATED))
+                (d / "wildcards.json").write_text(json.dumps(self.store))
+                out = t.build("x", d, refresh=False, log=lambda m: None)
+            self.assertEqual(list(out["wildcards"]), ["tmdb-21"])  # 20 isn't streaming or rentable
+        finally:
+            tmdb._get, c.scores, c.load = real
+
+    def test_diminishing_returns(self):
+        one, two, five = self.agreement(1), self.agreement(2), self.agreement(5)
+        self.assertLess(two - one, one)
+        self.assertLess(five, 17)
 
 
 if __name__ == "__main__":

@@ -36,11 +36,13 @@ from .watchlist import fetch
 NS = {"letterboxd": "https://letterboxd.com", "tmdb": "https://themoviedb.org"}
 HANDLE_RE = re.compile(r'<a href="/([A-Za-z0-9_]+)/" class="name"')
 EXTRA = Path(__file__).resolve().parent.parent / "household" / "circle.txt"
-MODEL = "claude-opus-5-5"
+MODEL = "claude-haiku-5-5"  # extraction is simple reading; Haiku costs about 1/40th of Opus
 BATCH = 8  # reviews per extraction call
+MAX_PER_RUN = 2000  # a ceiling on reviews read per sync, so one run can't drain the API credit
 MIN_REVIEW_CHARS = 80  # shorter entries are just a rating; nothing to extract
 QUOTE_MAX_WORDS = 30
 LIKE_BONUS = 0.25
+WARM = 0.6  # extracted sentiment that reads as a clearly warm review
 
 
 def read_following(username: str) -> list[str]:
@@ -158,8 +160,11 @@ def verified_quote(quote: str, text: str) -> str | None:
     return q
 
 
-def extract(store: dict, client=None, log=print, limit: int | None = None) -> int:
-    """Run the LLM over reviews without a record yet. Returns how many were extracted."""
+def extract(store: dict, client=None, log=print, limit: int | None = MAX_PER_RUN, save=None) -> int:
+    """Run the LLM over reviews without a record yet. Returns how many were extracted.
+
+    `save` is called every few batches so a run that stops partway (an outage,
+    a redeploy, the credit running out) keeps what it already paid for."""
     if client is None:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             return 0
@@ -169,6 +174,7 @@ def extract(store: dict, client=None, log=print, limit: int | None = None) -> in
         client = anthropic.Anthropic(base_url="https://api.anthropic.com")
     todo = [r for r in store.get("reviews", {}).values()
             if r.get("extract") is None and len(r.get("text") or "") >= MIN_REVIEW_CHARS]
+    todo.sort(key=lambda r: not loves(r))  # the reviews most likely to be quoted under a pick go first
     todo = todo[:limit] if limit else todo
     done = 0
     for i in range(0, len(todo), BATCH):
@@ -182,6 +188,7 @@ def extract(store: dict, client=None, log=print, limit: int | None = None) -> in
                 max_tokens=8000,
                 betas=["server-side-fallback-2026-07-01"],
                 fallbacks="default",
+                thinking={"type": "disabled"},
                 output_config={"effort": "low", "format": {"type": "json_schema", "schema": SCHEMA}},
                 messages=[{"role": "user", "content": PROMPT.format(max_words=QUOTE_MAX_WORDS, reviews=block)}],
             )
@@ -205,6 +212,8 @@ def extract(store: dict, client=None, log=print, limit: int | None = None) -> in
                 "model": MODEL,
             }
             done += 1
+        if save and (i // BATCH) % 10 == 9:
+            save()
     if done:
         log(f"circle: extracted {done} reviews")
     return done
@@ -221,8 +230,19 @@ def signal(r: dict) -> float:
     return s + (LIKE_BONUS if r.get("liked") else 0.0)
 
 
+def loves(r: dict) -> bool:
+    """The wildcard bar: 4 stars or more, a heart, or a clearly warm review.
+
+    When the review's words are negative they win over the stars."""
+    ex = r.get("extract")
+    if ex and ex["sentiment"] < 0:
+        return False
+    return (r.get("stars") or 0) >= 4 or bool(r.get("liked")) or bool(ex and ex["sentiment"] >= WARM)
+
+
 def scores(store: dict) -> dict[int, dict]:
-    """Per TMDB id: score (sum of each person's latest signal) and the best voice to quote."""
+    """Per TMDB id: score (sum of each person's latest signal), who loved it
+    (`fans`, by the wildcard bar) and the best voice to quote."""
     latest: dict[tuple[str, int], dict] = {}
     for r in store.get("reviews", {}).values():
         key = (r["who"], r["tmdb_id"])
@@ -231,10 +251,12 @@ def scores(store: dict) -> dict[int, dict]:
     films: dict[int, dict] = {}
     for (who, tid), r in latest.items():
         f = films.setdefault(tid, {"title": r["title"], "year": r.get("year"), "score": 0.0, "people": [],
-                                   "best": None})
+                                   "fans": [], "best": None})
         s = signal(r)
         f["score"] += s
         f["people"].append({"who": who, "signal": round(s, 2), "stars": r.get("stars")})
+        if loves(r):
+            f["fans"].append(who)
         q = (r.get("extract") or {}).get("quote")
         cand = (s, bool(q))
         if s > 0 and (f["best"] is None or cand > (f["best"]["signal"], bool(f["best"]["quote"]))):
@@ -265,10 +287,13 @@ def circle_boost(score: float) -> float:
 def refresh(username: str, data: Path, log=print) -> dict:
     path = data / "circle.json"
     store = json.loads(path.read_text()) if path.exists() else {}
+    def save():
+        path.write_text(json.dumps(store, indent=1, ensure_ascii=False))
+
     refresh_feeds(username, store, log)
-    path.write_text(json.dumps(store, indent=1, ensure_ascii=False))
-    extract(store, log=log)
-    path.write_text(json.dumps(store, indent=1, ensure_ascii=False))
+    save()
+    extract(store, log=log, save=save)
+    save()
     return store
 
 

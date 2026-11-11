@@ -86,3 +86,14 @@ or when there's only a 👎, is told to infer it from the picks that were kept. 
 the session's ask, so later follow-ups keep avoiding it. Without a reply link, a message that starts with
 "veto" applies to the pick it names (Nov 11: matched loosely, so "fire walk with me" finds "Twin Peaks: Fire Walk with Me"); if it names none, Delo asks which one instead of guessing. Fairness: whoever vetoed last session
 sits out, unless everyone vetoed, in which case nobody owes anything.
+
+## A blended quality score beside the taste fit (Nov 11)
+
+Chuck wants one consensus score built from Letterboxd, IMDb, Rotten Tomatoes, Metacritic and the trusted
+circle. Each source becomes a percentile among the films Delo knows, so their different scales compare.
+The weights are Letterboxd 30%, critics 30% (the mean of the Tomatometer and Metacritic), IMDb 15% (only
+with 500+ votes) and circle 25% (people who loved it, with diminishing returns). A missing source is
+skipped, not counted as zero, and `sources` records how many were used. Picks rank on 60% taste fit and
+40% quality, so a critics' favorite that doesn't suit the household doesn't win on reputation alone.
+Ratings come from OMDb (OMDB_API_KEY, 900 calls per nightly sync, refreshed every 30 days). How the score
+appears in messages is undecided, so it isn't shown yet.

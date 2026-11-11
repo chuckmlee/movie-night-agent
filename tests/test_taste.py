@@ -95,8 +95,13 @@ class CircleWildcards(unittest.TestCase):
 
     def test_only_circle_loved_unseen_features(self):
         wild = self.wildcards(CACHE, self.p, self.store, log=lambda m: None)
-        self.assertEqual([w.slug for w in wild], ["21", "20"])  # three fans beat one
+        self.assertEqual([w.slug for w in wild], ["21"])  # one fan isn't consensus
         self.assertEqual(wild[0].parts["fans"], 3)
+        # ...unless that one fan rates like you
+        self.p.twins = {"ann": {"weight": 0.6, "shared": 5, "both_loved": []}}
+        self.p.circle[20]["twins"] = ["ann"]
+        wild = self.wildcards(CACHE, self.p, self.store, log=lambda m: None)
+        self.assertEqual([w.slug for w in wild], ["21", "20"])
 
     def test_recommendations_alone_dont_make_a_wildcard(self):
         self.p.circle = {}

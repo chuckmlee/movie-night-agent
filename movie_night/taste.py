@@ -51,6 +51,10 @@ WILDCARD_MIN_VOTES = 50  # with a single fan, a floor against obscure festival e
 WILDCARD_MIN_RUNTIME = 60  # no shorts
 AGREE_SCALE = 17.0  # same scale as picker.TASTE_SCALE, so quality blends in the same way
 AVAILABILITY_CHECKS = 200  # watch-provider lookups per run while filling the wildcard pool
+TWIN_BONUS = 2.0  # a taste twin's love counts up to 3x a stranger's (1 + bonus x their weight, which is under 1)
+WILD_MAX_VOTES = 4000  # TMDB votes; above this a film is famous enough that you've likely seen it unlogged
+WILD_NEW_YEARS = 2  # ...unless it's this recent
+SOON_DAYS = 14
 FIT_NUDGE = 0.2  # the household's taste fit only breaks ties between equally loved films
 
 
@@ -134,8 +138,9 @@ def loved(e: dict) -> bool:
 
 
 def _details(tmdb_id: int) -> dict:
-    d = tmdb._get(f"/movie/{tmdb_id}", append_to_response="keywords,recommendations,watch/providers,videos,credits")
-    return {**tmdb.people(d),
+    d = tmdb._get(f"/movie/{tmdb_id}",
+                  append_to_response="keywords,recommendations,watch/providers,videos,credits,release_dates")
+    return {**tmdb.people(d), **tmdb.release_info(d),
         "tmdb_id": d["id"],
         "title": d.get("title"),
         "year": int(d["release_date"][:4]) if d.get("release_date") else None,
@@ -198,6 +203,7 @@ class Profile:
     loved_keywords: dict[str, list[str]] = field(default_factory=dict)  # keyword -> loved slugs
     rated: dict = field(default_factory=dict)
     circle: dict[int, dict] = field(default_factory=dict)  # tmdb id -> movie_night.circle.scores() entry
+    twins: dict[str, dict] = field(default_factory=dict)  # handle -> movie_night.circle.twins() entry
 
     def top_keywords(self, n=15) -> list[tuple[str, float]]:
         return sorted(self.keywords.items(), key=lambda kv: -kv[1])[:n]
@@ -282,9 +288,10 @@ def rank(cache: dict, p: Profile) -> list[Scored]:
     return sorted(out, key=lambda x: -x.score)
 
 
-def agreement(fans: int) -> float:
-    """Diminishing returns on the circle: one fan ~6.7, two ~10.7, three ~13.2, five ~15.6 (of 17)."""
-    return AGREE_SCALE * (1 - math.exp(-fans / 2))
+def agreement(fans: float) -> float:
+    """Diminishing returns on the circle: one fan ~3.8 of 17, two ~6.7, four ~10.7, eight ~14.7.
+    A taste twin counts as more than one fan (TWIN_BONUS), so `fans` can be fractional."""
+    return AGREE_SCALE * (1 - math.exp(-fans / 4))
 
 
 def wildcards(cache: dict, p: Profile, store: dict, lookups: int = WILDCARD_LOOKUPS, log=print) -> list[Scored]:
@@ -307,15 +314,20 @@ def wildcards(cache: dict, p: Profile, store: dict, lookups: int = WILDCARD_LOOK
             fetched += 1
             time.sleep(0.05)
         e = store[key]
-        fans = len(p.circle[rid]["fans"])
+        c = p.circle[rid]
+        fans = len(c["fans"])
         new_release = (e.get("year") or 0) >= dt.date.today().year - 1  # too new for many votes
         if e.get("runtime_min") and e["runtime_min"] < WILDCARD_MIN_RUNTIME:
             continue
         if fans < 2 and not new_release and (e.get("vote_count") or 0) < WILDCARD_MIN_VOTES:
             continue
+        if (e.get("vote_count") or 0) > WILD_MAX_VOTES and (e.get("year") or 0) < dt.date.today().year - WILD_NEW_YEARS:
+            continue  # famous and older: likely seen before you started logging
+        tw = [w for w in c.get("twins") or [] if w in p.twins]
+        effective = fans + TWIN_BONUS * sum(p.twins[w]["weight"] for w in tw)
         fit, parts = score(e, p)
-        parts["fans"] = fans
-        out.append(Scored(key, agreement(fans) + FIT_NUDGE * fit, reason(e, p, parts), parts))
+        parts.update(fans=fans, twins=tw)
+        out.append(Scored(key, agreement(effective) + FIT_NUDGE * fit, reason(e, p, parts), parts))
     if fetched:
         log(f"taste: looked up {fetched} circle-loved films, {sum(1 for t in cands if str(t) not in store)} left")
     return sorted(out, key=lambda x: -x.score)
@@ -378,12 +390,15 @@ def build(username: str, data: Path, export: Path | None = None, refresh: bool =
         rated_path.write_text(json.dumps(store, indent=1, ensure_ascii=False))
     cache = json.loads((data / "films.json").read_text())
     p = build_profile(store)
-    p.circle = circle_mod.scores(circle_mod.load(data))
+    cstore = circle_mod.load(data)
+    p.twins = circle_mod.twins(cstore, store)
+    p.circle = circle_mod.scores(cstore, p.twins)
     wstore = json.loads(wild_path.read_text()) if wild_path.exists() else {}
     today = dt.date.today().isoformat()
     # Keep the best-loved films you can actually watch tonight: the circle's
     # favorites are often festival films that aren't streaming yet.
-    wild, checked = [], 0
+    wild, soon, checked = [], [], 0
+    soon_end = (dt.date.today() + dt.timedelta(days=SOON_DAYS)).isoformat()
     for w in wildcards(cache, p, wstore, log=log):
         if len(wild) >= keep_wild or checked >= AVAILABILITY_CHECKS:
             break
@@ -396,9 +411,18 @@ def build(username: str, data: Path, export: Path | None = None, refresh: bool =
                 log(f"  availability failed for wildcard {e['title']}: {err}")
             checked += 1
             time.sleep(0.05)
+        if tmdb.release_due(e, today):  # popularity and digital date for gems and "coming soon"
+            try:
+                e.update(tmdb.release_meta(e["tmdb_id"]))
+            except urllib.error.URLError as err:
+                log(f"  release dates failed for wildcard {e['title']}: {err}")
+            checked += 1
+            time.sleep(0.05)
         a = e.get("availability") or {}
         if a.get("included") or a.get("rent"):
             wild.append(w)
+        elif today < (e.get("digital_release") or "") <= soon_end and len(soon) < 10:
+            soon.append(w)
     wild_path.write_text(json.dumps(wstore, indent=1, ensure_ascii=False))
     out = {
         "built": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -406,10 +430,16 @@ def build(username: str, data: Path, export: Path | None = None, refresh: bool =
         "scores": {s.slug: [round(s.score, 2), pick_reason(s, cache[s.slug], p)] for s in rank(cache, p)},
         "wildcards": {f"tmdb-{w.slug}": {**{k: wstore[w.slug].get(k) for k in (
             "tmdb_id", "title", "year", "runtime_min", "genres", "availability", "trailer_url",
-            "poster_path", "keywords", "overview", "directors", "cast", "countries", "language")},
+            "poster_path", "keywords", "overview", "directors", "cast", "countries", "language",
+            "vote_count", "digital_release")},
             "wildcard": True, "on_watchlist": False, "score": round(w.score, 2),
+            "twins": [{"who": t, **p.twins[t]} for t in w.parts.get("twins") or []],
             "reason": pick_reason(w, wstore[w.slug], p)}
             for w in wild},
+        "coming_soon": [{"title": wstore[w.slug]["title"], "year": wstore[w.slug].get("year"),
+                         "digital_release": wstore[w.slug]["digital_release"], "fans": w.parts.get("fans", 0),
+                         "twins": w.parts.get("twins") or []} for w in soon],
+        "twins": p.twins,
     }
     (data / "taste.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
     log(f"taste: profile from {len(store)} films, {len(out['scores'])} watchlist scores, {len(wild)} wildcards")

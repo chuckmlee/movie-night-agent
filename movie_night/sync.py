@@ -126,6 +126,17 @@ def sync(username: str, data: Path = DATA, limit: int | None = None, log=print) 
             except urllib.error.URLError as err:
                 log(f"  tmdb credits failed for {f.slug}: {err}")
             time.sleep(TMDB_DELAY)
+        if tmdb.release_due(entry, today):  # popularity and US digital date (Nov 11): hidden gems, coming soon
+            try:
+                entry.update(tmdb.release_meta(entry["tmdb_id"]))
+                stats["release_checked"] = stats.get("release_checked", 0) + 1
+            except urllib.error.HTTPError as err:
+                if err.code == 404:
+                    entry.update(vote_count=0, digital_release=None, release_checked=today)
+                log(f"  tmdb release dates failed for {f.slug}: {err}")
+            except urllib.error.URLError as err:
+                log(f"  tmdb release dates failed for {f.slug}: {err}")
+            time.sleep(TMDB_DELAY)
         save_json(cache_path, cache)
 
     # Daily availability snapshot for everything still on the list.

@@ -489,12 +489,14 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
             "and I'll swap in another."
         if no_veto:
             intro += f" ({', '.join(no_veto)}: no veto tonight, you used one last time.)"
+        if p.extra:
+            intro += "\n" + p.extra
         linq.say(chat_id, intro)
         msg_to_slug = {}
         marks = emojis({s: cache[s] for s in slugs})
         for slug in slugs:
             ensure_poster(cache[slug], posters)
-            label = linq_format.WILDCARD_LABEL if slug in p.wildcards else None  # label only the exception
+            label = p.labels.get(slug) or (linq_format.WILDCARD_LABEL if slug in p.wildcards else None)
             body = linq_format.pick_message(
                 linq_format.pick_from_cache(cache[slug], p.reasons.get(slug), marks.get(slug), label))
             msg_to_slug[linq.send(chat_id, body)] = slug

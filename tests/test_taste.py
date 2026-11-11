@@ -122,7 +122,7 @@ class CircleWildcards(unittest.TestCase):
         streams = {"results": {"US": {"flatrate": [{"provider_id": 8, "provider_name": "Netflix"}]}}}
         real = (tmdb._get, c.scores, c.load)
         tmdb._get = lambda path, **kw: streams if "/21/" in path else {"results": {}}
-        c.scores, c.load = (lambda store: self.p.circle), (lambda data: {})
+        c.scores, c.load = (lambda store, *a: self.p.circle), (lambda data: {})
         try:
             with tempfile.TemporaryDirectory() as d:
                 d = Path(d)

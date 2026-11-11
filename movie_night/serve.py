@@ -40,6 +40,7 @@ from pathlib import Path
 from . import emoji as emoji_mod
 from .ask import Asker
 from . import circle as circle_mod
+from . import discover
 from . import sync as sync_mod
 from . import quality as quality_mod
 from .seen import FreshSeen
@@ -204,6 +205,10 @@ def agent_loop(chat: str, data: Path, every: float, user: str = "chucklee", stat
                 quality_mod.annotate(cache, quality_mod.load(data))
             except Exception as e:
                 log(f"quality: skipped this poll: {e!r}")
+            try:  # "new on Netflix since Nov 3": from the daily availability snapshots
+                discover.annotate(cache, data)
+            except Exception as e:
+                log(f"discover: skipped this poll: {e!r}")
             what = step(linq, chat, state, cache, history, lookup=tmdb_lookup, taste=taste, emojis=emojis, ask=asker)
             STATUS["last_poll"] = dt.datetime.now(dt.timezone.utc).isoformat()
             if what:

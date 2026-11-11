@@ -125,3 +125,14 @@ movies" by director, "something with Cate Blanchett" by cast. A surname counts o
 belongs to a single person in the cache. "no/not/without <name>" removes that person's films from
 every kind of pick, including veto replacements. More specific genres come from TMDB tags for now, and
 Letterboxd nanogenres are a possible next step.
+
+## Don't offer the same film over and over (Nov 11)
+
+Chuck kept getting Blue Velvet as a wildcard after rating it, and Cutter's Way as every veto replacement.
+There were two causes, so there are two fixes:
+1. Only tallied sessions counted as "recent". Now any film offered in a kickoff, follow-up or replacement
+   isn't offered again for 36 hours (state.shown). A follow-up may keep the picks it narrows, and a narrow
+   ask that fits nothing else falls back to films already offered rather than coming up empty.
+2. New ratings only reached the taste profile at 5 AM. Now movie_night.seen reads the household's diary
+   RSS and the first page of films sorted by rating date, at most every 15 minutes, and drops anything
+   just watched or rated, except the open session's picks.

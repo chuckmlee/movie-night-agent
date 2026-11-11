@@ -78,6 +78,22 @@ def _is_refinement(text: str) -> bool:
 
 TALLY_RE = re.compile(r"^\s*(tally|done|count|results?|pick it|decide)\b", re.I)
 RECENT_SESSIONS_EXCLUDED = 3
+# Films offered in this window aren't offered again, even when nobody finished the
+# session (Nov 11: the same wildcard and the same veto replacement every time,
+# because only tallied sessions counted as "recent").
+SHOWN_HOURS = 36
+
+
+def recently_shown(state: "State", keep: set[str] = frozenset()) -> set[str]:
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=SHOWN_HOURS)).isoformat()
+    state.shown = {s: t for s, t in state.shown.items() if t >= cutoff}
+    return set(state.shown) - set(keep)
+
+
+def mark_shown(state: "State") -> None:
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    for s in (state.active or {}).get("films", []):
+        state.shown.setdefault(s, now)
 
 
 def clean_token(token: str | None) -> str | None:
@@ -135,6 +151,7 @@ class Linq:
 class State:
     seen: list[str] = field(default_factory=list)  # message ids already handled
     active: dict | None = None  # {"kickoff_id", "films": [slug], "msg_to_slug": {id: slug}, "started"}
+    shown: dict = field(default_factory=dict)  # slug -> when it was first offered (ISO), for SHOWN_HOURS
 
     @classmethod
     def load(cls, path: Path) -> "State":
@@ -441,7 +458,11 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
     if kick:
         text = f"{prev_ask}\nFollow-up: {_bare(_text(kick))}" if refine else _text(kick)
         recent = {s for h in history[-RECENT_SESSIONS_EXCLUDED:] for s in h.get("films", [])}
-        p = plan(text, cache, exclude=recent, seed=seed, lookup=lookup, taste=taste, ask=ask, refine=refine)
+        # A follow-up may keep films from the picks it narrows; a fresh ask gets new ones.
+        shown = recently_shown(state, keep=(state.active or {}).get("films", []) if refine else ())
+        p = plan(text, cache, exclude=recent | shown, seed=seed, lookup=lookup, taste=taste, ask=ask, refine=refine)
+        if not p.slugs and shown:  # a narrow ask may only fit films already offered; better those than nothing
+            p = plan(text, cache, exclude=recent, seed=seed, lookup=lookup, taste=taste, ask=ask, refine=refine)
         if not refine and not KICKOFF_RE.search(text) and (p.note or "").startswith("I couldn't find"):
             p = None  # "something like that" in passing; not a request
     if refine and not p.slugs:  # keep the picks they have rather than dropping them
@@ -477,11 +498,13 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         state.active = {"kickoff_id": kick["id"], "ask": text, "films": slugs, "msg_to_slug": msg_to_slug,
                         "entries": {s: cache[s] for s in p.wildcards},
                         "started": dt.datetime.now(dt.timezone.utc).isoformat()}
+        mark_shown(state)
         return f"kickoff: sent {len(slugs)} picks"
 
     trailers = send_trailers(linq, chat_id, state.active, cache, msgs)
     hist = history_for(history)
     recent = {s for h in history[-RECENT_SESSIONS_EXCLUDED:] for s in h.get("films", [])}
+    shown = recently_shown(state)
 
     def replace(slug: str, reason: str):
         active = state.active
@@ -489,13 +512,17 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         why = reason or "no reason given, so infer what they rejected from how it differs from the picks they kept"
         text = (f"{active.get('ask') or 'movie night'}\nVetoed {cache[slug]['title']} ({why}). "
                 f"Kept: {', '.join(kept)}. Choose its replacement.")
-        rp = plan(text, cache, exclude=recent | set(active["films"]), seed=seed, lookup=lookup, taste=taste,
-                  ask=ask, refine=True)
+        rp = plan(text, cache, exclude=recent | shown | set(active["films"]), seed=seed, lookup=lookup,
+                  taste=taste, ask=ask, refine=True)
+        if not rp.slugs and shown:
+            rp = plan(text, cache, exclude=recent | set(active["films"]), seed=seed, lookup=lookup, taste=taste,
+                      ask=ask, refine=True)
         new = next((s for s in rp.slugs if s not in active["films"]), None)
         return (new, new in rp.wildcards or not cache[new].get("on_watchlist")) if new else None
 
     swapped = handle_vetoes(linq, chat_id, state.active, cache, msgs, worded, hist, names, replace, emojis, posters)
     if swapped:
+        mark_shown(state)
         return f"veto: replaced {', '.join(swapped)}"
     session = build_session(state.active, cache, msgs, people, hist)
     asked = any(TALLY_RE.search(_bare(_text(m))) for m in new)

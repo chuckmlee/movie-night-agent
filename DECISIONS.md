@@ -77,3 +77,12 @@ While picks are open, a message that opens like an instruction ("limit to Cathol
 last ask as a "Follow-up:" line and sent to Claude, even without a tone word. The new picks replace the
 open ones. Other chat between the two of them is still ignored, and with no picks open a follow-up is
 ignored too. "Like X but less Y" now reads the title as X alone, so the TMDB lookup finds X.
+
+## Vetoes bring a replacement, and can say why (Nov 11)
+
+Suggested by Chuck. A veto, either a 👎 or a reply on a pick like "veto, too bleak", "nah, too long" or
+"no war movies", brings one replacement pick, and the replacement can't be vetoed. Claude gets the reason,
+or when there's only a 👎, is told to infer it from the picks that were kept. The reason is also added to
+the session's ask, so later follow-ups keep avoiding it. Without a reply link, a message that starts with
+"veto" applies to the pick it names, or else to the latest pick. Fairness: whoever vetoed last session
+sits out, unless everyone vetoed, in which case nobody owes anything.

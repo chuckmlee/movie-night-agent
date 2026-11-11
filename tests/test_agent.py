@@ -111,6 +111,7 @@ class Flow(unittest.TestCase):
         self.linq.react(pick_msg(self.linq, st, "bravo"), A, "🥈")
         self.linq.react(pick_msg(self.linq, st, "bravo"), B, "🥇")
         self.linq.react(pick_msg(self.linq, st, "alpha"), B, tapback="dislike")
+        self.assertEqual(self.poll(now=5), "veto: replaced alpha")
         self.assertIsNone(self.poll(now=10))  # golds in, but people may still add 🥈/🥉
         self.assertIsNone(self.poll(now=60))
         self.assertEqual(self.poll(now=200), "tally: bravo")  # settled; Alpha vetoed
@@ -253,6 +254,70 @@ class Flow(unittest.TestCase):
     def test_follow_up_without_open_picks_is_ignored(self):
         self.linq.human(A, "limit it to comedies")
         self.assertIsNone(self.poll())
+
+    def start(self, ask=None):
+        self.linq.human(A, "movie night?")
+        self.vpoll(ask=ask)
+        return self.state
+
+    def vpoll(self, now=0.0, ask=None):
+        return step(self.linq, "chat", self.state, CACHE, self.history, seed=0, now=now,
+                    posters=lambda i: None, ask=ask)
+
+    def test_reply_veto_with_reason_swaps_in_a_replacement(self):
+        asks = []
+
+        def ask(text, pool, seed):
+            asks.append(text)
+            return None  # Claude down: the keyword picker still finds a replacement
+
+        st = self.start()
+        first = list(st.active["films"])
+        self.linq._add(B, "veto because too bleak", reply_to={"message_id": pick_msg(self.linq, st, "alpha")})
+        self.assertEqual(self.vpoll(ask=ask), "veto: replaced alpha")
+        self.assertIn("Vetoed Alpha (too bleak)", asks[-1])
+        new = st.active["films"][-1]
+        self.assertNotIn(new, first)
+        self.assertIn("Swapping out Alpha (too bleak)", self.linq.sent[-2])
+        self.assertIn("Replaces Alpha", self.linq.sent[-1])
+        self.assertIn("Vetoed Alpha: too bleak", st.active["ask"])  # later follow-ups keep avoiding it
+        # The replacement can't be vetoed, and the worded veto counts in the tally.
+        self.linq.react(pick_msg(self.linq, st, new), A, tapback="dislike")
+        self.assertIsNone(self.vpoll())
+        self.assertIn("can't be vetoed", self.linq.sent[-1])
+        self.linq.react(pick_msg(self.linq, st, new), A, "🥇")
+        self.linq.react(pick_msg(self.linq, st, "bravo"), B, "🥇")
+        self.linq.human(A, "tally")
+        self.vpoll()
+        self.assertIn("Vetoed: Alpha", self.linq.sent[-1])
+        self.assertEqual(self.history[-1]["vetoed_by"], [B])
+
+    def test_veto_naming_a_film_without_a_reply(self):
+        st = self.start()
+        self.linq.human(A, "veto Bravo, too long")
+        self.assertEqual(self.vpoll(), "veto: replaced bravo")
+        self.assertIn("(too long)", self.linq.sent[-2])
+
+    def test_one_replacement_per_person(self):
+        st = self.start()
+        self.linq.react(pick_msg(self.linq, st, "alpha"), A, tapback="dislike")
+        self.vpoll()
+        n = len(self.linq.sent)
+        self.linq.react(pick_msg(self.linq, st, "bravo"), A, tapback="dislike")
+        self.vpoll()
+        self.assertEqual(len(self.linq.sent), n)
+
+    def test_vetoes_reset_when_everyone_vetoed(self):
+        from movie_night.agent import history_for
+        self.assertEqual(history_for([{"people": [A, B], "vetoed_by": [A, B]}]).vetoed_last_session, set())
+        self.assertEqual(history_for([{"people": [A, B], "vetoed_by": [A]}]).vetoed_last_session, {A})
+
+    def test_no_war_movies_without_a_reply_is_a_follow_up(self):
+        st = self.start()
+        kick = st.active["kickoff_id"]
+        self.linq.human(B, "no war movies")
+        self.assertTrue(self.vpoll().startswith("kickoff"))
+        self.assertNotEqual(self.state.active["kickoff_id"], kick)
 
     def test_delo_tally_is_not_a_new_ask(self):
         self.linq.human(A, "movie")

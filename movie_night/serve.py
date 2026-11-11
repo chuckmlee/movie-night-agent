@@ -12,6 +12,7 @@
 Config comes from the environment (set on the host, never committed):
   LINQ_TOKEN, TMDB_TOKEN   API credentials
   ANTHROPIC_API_KEY        optional: lets Claude read the circle's reviews for quotes
+  OMDB_API_KEY             optional: IMDb, Rotten Tomatoes and Metacritic for the quality score
   MNA_CHAT_ID              the household group chat id
   MNA_LETTERBOXD_USER      whose watchlist and ratings (default: chucklee)
   MNA_LETTERBOXD_EXPORT    unzipped Letterboxd data export, for the full rating
@@ -38,6 +39,7 @@ from . import emoji as emoji_mod
 from .ask import Asker
 from . import circle as circle_mod
 from . import sync as sync_mod
+from . import quality as quality_mod
 from . import taste as taste_mod
 from . import tmdb
 from .agent import Linq, State, load_history, step, tmdb_lookup
@@ -110,6 +112,15 @@ def run_sync(user: str, data: Path) -> None:
     except Exception as e:
         STATUS["errors"] += 1
         log(f"taste profile failed: {e!r}")
+    try:  # IMDb / Rotten Tomatoes / Metacritic via OMDb, then the blended score; picks work without it
+        films = json.loads((data / "films.json").read_text())
+        films.update((taste_mod.load(data) or {}).get("wildcards") or {})
+        quality_mod.refresh(films, data, log=log)
+        q = quality_mod.build(films, data, log=log)
+        STATUS["last_quality"] = {"scored": len(q)}
+    except Exception as e:
+        STATUS["errors"] += 1
+        log(f"quality score failed: {e!r}")
 
 
 def sync_loop(user: str, data: Path, hour: int) -> None:
@@ -175,6 +186,7 @@ def agent_loop(chat: str, data: Path, every: float) -> None:
             taste = taste_mod.load(data)
             if taste:
                 cache.update(taste.get("wildcards") or {})
+            quality_mod.annotate(cache, quality_mod.load(data))
             what = step(linq, chat, state, cache, history, lookup=tmdb_lookup, taste=taste, emojis=emojis, ask=asker)
             STATUS["last_poll"] = dt.datetime.now(dt.timezone.utc).isoformat()
             if what:

@@ -73,6 +73,14 @@ def eligible(entry: dict, hints: Hints, wildcard: bool = False) -> bool:
 
 
 TASTE_JITTER = 5.0  # taste scores run 0 to ~17; this keeps the top 30 or so in rotation
+TASTE_SCALE = 17.0
+FIT_SHARE = 0.6  # ranking = 60% fit (taste) + 40% consensus quality (movie_night.quality), when known
+
+
+def with_quality(fit: float, e: dict, scale: float = TASTE_SCALE) -> float:
+    """Blend a fit score (0..scale) with the film's 0-100 quality score, if it has one."""
+    q = e.get("quality")
+    return fit if q is None else FIT_SHARE * fit + (1 - FIT_SHARE) * q * scale / 100
 
 
 def choose(cache: dict, hints: Hints, n: int = 5, exclude: set[str] = frozenset(), seed: int | None = None,
@@ -89,10 +97,10 @@ def choose(cache: dict, hints: Hints, n: int = 5, exclude: set[str] = frozenset(
     def key(se):
         slug, e = se
         if wildcard:
-            return e.get("score", 0) + rng.uniform(0, TASTE_JITTER)
+            return with_quality(e.get("score", 0), e) + rng.uniform(0, TASTE_JITTER)
         if taste and slug in taste:
-            return taste[slug][0] + rng.uniform(0, TASTE_JITTER)
-        return (e.get("letterboxd_rating") or 3.0) + rng.uniform(0, 0.6)
+            return with_quality(taste[slug][0], e) + rng.uniform(0, TASTE_JITTER)
+        return with_quality(e.get("letterboxd_rating") or 3.0, e, 5.0) + rng.uniform(0, 0.6)
 
     scored = sorted(pool, key=key, reverse=True)
     picks, per_genre = [], {}
@@ -217,8 +225,8 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
                 matched = search.matches_topics(e, topics)
                 if matched:
                     included = bool((e.get("availability") or {}).get("included"))
-                    fit = scores[slug][0] + rng.uniform(0, TASTE_JITTER) if slug in scores else \
-                        (e.get("letterboxd_rating") or 3.0) + rng.uniform(0, 0.6)
+                    fit = with_quality(scores[slug][0], e) + rng.uniform(0, TASTE_JITTER) if slug in scores else \
+                        with_quality(e.get("letterboxd_rating") or 3.0, e, 5.0) + rng.uniform(0, 0.6)
                     hits.append((included, len(matched), fit, slug, matched))
             hits.sort(reverse=True)
             top = hits[:n]

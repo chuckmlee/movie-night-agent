@@ -60,9 +60,11 @@ def pick_from_cache(entry: dict, reason: str | None = None, emoji: str | None = 
         where = "Streaming on " + where[3:]
     from .honors import line as honors_line
 
-    h = honors_line(entry)
-    if h and h not in (reason or ""):
-        reason = f"{reason}\n{h}" if reason else h
+    from .festivals import line as festival_line
+
+    for h in (honors_line(entry), festival_line(entry)):
+        if h and h not in (reason or ""):
+            reason = f"{reason}\n{h}" if reason else h
     quoted = any(x.startswith("💬") for x in (reason or "").splitlines())
     return Pick(entry["title"], entry.get("year"), entry.get("runtime_min"),
                 tuple(entry.get("genres") or ()), where, reason, entry.get("trailer_url"), poster_url(entry),

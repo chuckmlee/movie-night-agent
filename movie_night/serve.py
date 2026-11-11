@@ -41,6 +41,7 @@ from . import emoji as emoji_mod
 from .ask import Asker
 from . import circle as circle_mod
 from . import discover
+from . import festivals as festivals_mod
 from . import honors as honors_mod
 from . import sync as sync_mod
 from . import quality as quality_mod
@@ -124,6 +125,11 @@ def run_sync(user: str, data: Path) -> None:
     except Exception as e:
         STATUS["errors"] += 1
         log(f"honors failed: {e!r}")
+    try:  # critics' scores at Cannes, Venice, Berlinale and Sundance; feeds the quality score below
+        festivals_mod.refresh(data, log=log)
+    except Exception as e:
+        STATUS["errors"] += 1
+        log(f"festivals failed: {e!r}")
     try:  # IMDb / Rotten Tomatoes / Metacritic via OMDb, then the blended score; picks work without it
         films = json.loads((data / "films.json").read_text())
         films.update((taste_mod.load(data) or {}).get("wildcards") or {})
@@ -215,6 +221,7 @@ def agent_loop(chat: str, data: Path, every: float, user: str = "chucklee", stat
                 log(f"quality: skipped this poll: {e!r}")
             try:  # 🏆 and "loved for" lines, and more for Claude to go on
                 honors_mod.annotate(cache, honors_mod.load(data))
+                festivals_mod.annotate(cache, festivals_mod.cached_index(data))
                 loved = (taste or {}).get("circle_loved") or {}
                 for e in cache.values():
                     e["circle_loved"] = loved.get(str(e.get("tmdb_id")))

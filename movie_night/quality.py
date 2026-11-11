@@ -149,9 +149,13 @@ def circle_points(score: float) -> float:
 
 
 def blend(entries: dict, ratings: dict, circle: dict[int, dict] | None = None,
-          weights: dict[str, float] = WEIGHTS) -> dict[str, dict]:
-    """Per film key: {"score": 0-100, "sources": n, "parts": {source: 0-100}}."""
-    circle = circle or {}
+          weights: dict[str, float] = WEIGHTS, festival: dict[str, float] | None = None) -> dict[str, dict]:
+    """Per film key: {"score": 0-100, "sources": n, "parts": {source: 0-100}}.
+
+    `festival` is where the critics at a festival ranked the film that year (0-100,
+    movie_night.festivals). It's averaged into the critics part, so a new festival
+    film has a critics score months before Rotten Tomatoes and Metacritic do."""
+    circle, festival = circle or {}, festival or {}
     raw: dict[str, dict[str, float]] = {"letterboxd": {}, "critics": {}, "imdb": {}}
     films = {}
     for e in entries.values():
@@ -171,6 +175,9 @@ def blend(entries: dict, ratings: dict, circle: dict[int, dict] | None = None,
     out = {}
     for k, e in films.items():
         parts = {src: round(p[k], 1) for src, p in pct.items() if k in p}
+        if k in festival:
+            fest = festival[k]
+            parts["critics"] = round((parts["critics"] + fest) / 2 if "critics" in parts else fest, 1)
         c = circle.get(e.get("tmdb_id"))
         if c:
             parts["circle"] = round(circle_points(c["score"]), 1)
@@ -179,7 +186,7 @@ def blend(entries: dict, ratings: dict, circle: dict[int, dict] | None = None,
         w = sum(weights[s] for s in parts)
         r = ratings.get(k) or {}
         raw_vals = {"letterboxd": e.get("letterboxd_rating"), "rt": r.get("rt"), "mc": r.get("mc"),
-                    "imdb": r.get("imdb") if "imdb" in parts else None,
+                    "imdb": r.get("imdb") if "imdb" in parts else None, "festival": k in festival or None,
                     "fans": sum(1 for p in (c or {}).get("people", []) if p.get("signal", 0) > 0)}
         out[k] = {"score": round(sum(weights[s] * v for s, v in parts.items()) / w, 1),
                   "sources": len(parts), "parts": parts, "raw": {a: b for a, b in raw_vals.items() if b}}
@@ -204,6 +211,8 @@ def highlight(q: dict, skip_circle: bool = False) -> str | None:
         if gap <= -SPLIT:
             return "fans love it, critics split"
     best = max((s for s in parts if s != "circle"), key=lambda s: parts[s], default=None)
+    if best == "critics" and raw.get("rt") is None and raw.get("mc") is None:
+        return "festival critics' favorite" if parts["critics"] >= 70 else None  # the 🎟️ line has the details
     if best == "critics":
         crit = f"{raw['rt']}% on Rotten Tomatoes" if raw.get("rt") is not None else f"{raw.get('mc')} on Metacritic"
         return "critics' favorite" if parts["critics"] >= 70 else crit  # the full figure wouldn't fit one line
@@ -238,7 +247,15 @@ def build(entries: dict, data: Path, log=print) -> dict:
     """Recompute data/quality.json from the cached ratings and the circle."""
     path = data / "ratings.json"
     ratings = json.loads(path.read_text()) if path.exists() else {}
-    q = blend(entries, ratings, circle_mod.scores(circle_mod.load(data)))
+    from . import festivals
+
+    idx = festivals.index(festivals.load(data))
+    fest = {}
+    for e in entries.values():
+        f = festivals.match(e, idx) if idx and key(e) else None
+        if f and f.get("rank"):
+            fest[key(e)] = festivals.percentile({"festival": f})
+    q = blend(entries, ratings, circle_mod.scores(circle_mod.load(data)), festival=fest)
     (data / "quality.json").write_text(json.dumps(q, indent=1))
     log(f"quality: scored {len(q)} films")
     return q

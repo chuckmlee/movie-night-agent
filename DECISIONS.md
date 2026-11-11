@@ -251,3 +251,29 @@ How honors are used:
 **What the circle loved.** The review extraction already records up to three "loved" phrases per review.
 Delo now totals them per film from people who liked it, most mentioned first. Picks show "❤️ Loved for: the
 score, the ending" when there isn't a quote, and Claude sees the phrases too.
+
+## Critics at the festival, from cannes-ratings (Nov 11)
+
+Chuck found Reini Urban's cannes-ratings (cannes-ratings.org, data at github.com/rurban/cannes-ratings). Each
+year it collects critics' scores from Cannes (since 2010), Sundance (2015), Berlinale (2016) and Venice (2025):
+Screen Daily's jury grid, Le film français, ioncinema, critic.de, the ICS panel, Moiree and single reviews, all
+converted to 0-10. For a new festival film, that's two dozen critics months before Rotten Tomatoes or
+Metacritic say much.
+
+movie_night/festivals.py fetches the data files from raw.githubusercontent.com (past years once, the last two
+years weekly) into data/festivals.json, about 3,400 films. Per film it keeps:
+- the critics' mean, leaving out the Letterboxd users the files also list and critics listed twice;
+- where that put the film among the festival's rated films that year;
+- the jury prizes from the main competition.
+
+Films are matched to Delo's by English or original title, and by year within one. When both sides name a
+director, the directors must share a name too. On Nov 11's data, 127 of 1,159 films matched.
+
+How it's used:
+- **Quality.** The festival rank is averaged into the critics part of the blended score, or becomes the critics
+  part when there's no Rotten Tomatoes or Metacritic yet. A new festival film with a Letterboxd average then has
+  two sources, so it can count as a hidden gem.
+- **Picks.** Picks show "🎟️ Cannes 2025 critics: #8 of 93 (6.9/10)" when the film ranked in the top quarter.
+  The line shows rank because festival means bunch up: Sentimental Value won the Grand Prix with a 6.5 mean.
+- **Claude** sees the rank and mean for nuanced asks.
+- **Honors.** Jury prizes fill in honors when Wikidata hasn't caught up on a recent festival yet.

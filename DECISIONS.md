@@ -170,3 +170,10 @@ Chuck wanted to try Delo alone, without texting the household group. Delo only w
 one-on-one text went unanswered. Setting MNA_TEST_CHAT_ID makes Delo watch a second chat too. It answers
 there exactly as in the group, but its sessions, vetoes, history and recently offered films are kept in
 data/test/, so testing never changes what the household is offered or who can veto.
+
+## Ask Linq for iMessage on every send (Nov 11)
+
+In Chuck's one-on-one test chat, Linq sent Delo's replies as SMS even though the chat itself was iMessage,
+and none of them arrived. A message sent with preferred_service "iMessage" went out as iMessage and was
+delivered, so every send now asks for it. Linq's SDK marks the field deprecated. If Linq drops it, this
+needs another fix.

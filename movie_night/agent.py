@@ -141,6 +141,9 @@ class Linq:
             print("SEND:", " | ".join(p.get("value") or p.get("url") or "" for p in parts))
             self._fake += 1
             return f"dry-{self._fake}"
+        # Without this, Linq sent one-on-one replies as SMS, which never arrived (Nov 11). The SDK marks
+        # the field deprecated, but asking for iMessage is what got the test message delivered.
+        body = {**body, "message": {**body["message"], "preferred_service": "iMessage"}}
         return self._call("POST", f"/chats/{chat_id}/messages", body)["message"]["id"]
 
     def say(self, chat_id: str, text: str) -> str:

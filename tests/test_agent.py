@@ -386,5 +386,16 @@ class Flow(unittest.TestCase):
         self.assertIn(f"🏆 Tonight: {wild[w]['title']}", self.linq.sent[-1])
 
 
+class SendService(unittest.TestCase):
+    def test_every_send_asks_for_imessage(self):
+        from movie_night.agent import Linq
+        linq = Linq(token="x")
+        sent = []
+        linq._call = lambda method, path, body=None: sent.append(body) or {"message": {"id": "m1"}}
+        linq.say("chat", "hi")
+        self.assertEqual(sent[0]["message"]["preferred_service"], "iMessage")
+        self.assertEqual(sent[0]["message"]["parts"][0]["value"], "hi")
+
+
 if __name__ == "__main__":
     unittest.main()

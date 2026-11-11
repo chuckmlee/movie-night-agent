@@ -135,4 +135,4 @@ There were two causes, so there are two fixes:
    ask that fits nothing else falls back to films already offered rather than coming up empty.
 2. New ratings only reached the taste profile at 5 AM. Now movie_night.seen reads the household's diary
    RSS and the first page of films sorted by rating date, at most every 15 minutes, and drops anything
-   just watched or rated, except the open session's picks.
+   just watched or rated, except the open session's picks. (Nov 11: the rated-date page returns 403 to Delo, so only the RSS is read, and a rating with no diary entry waits for 5 AM.)

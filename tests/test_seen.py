@@ -21,16 +21,17 @@ class Fresh(unittest.TestCase):
         return FreshSeen("hh", fetch=fetch, log=lambda m: None, clock=lambda: 0), calls
 
     def test_drops_logged_and_rated_films_but_keeps_open_picks(self):
-        seen, calls = self.make({"rss": RSS, "rated-date": RATED})
+        seen, calls = self.make({"rss": RSS})
         cache = {"tmdb-793": {"title": "Blue Velvet", "year": 1986, "tmdb_id": 793, "wildcard": True},
                  "heat": {"title": "Heat", "year": 1995, "tmdb_id": 949},
                  "thief": {"title": "Thief", "year": 1981, "tmdb_id": 11524},
                  "carol": {"title": "Carol", "year": 2015, "tmdb_id": 258480}}
         seen.slugs.add("carol")
+        seen.slugs.add("heat")
         self.assertEqual(sorted(seen.drop(cache, keep=["carol"])), ["heat", "tmdb-793"])
         self.assertEqual(sorted(cache), ["carol", "thief"])
         seen.drop({})
-        self.assertEqual(len(calls), 2)  # cached for 15 minutes
+        self.assertEqual(len(calls), 1)  # cached for 15 minutes
 
     def test_a_failed_fetch_keeps_working(self):
         import urllib.error

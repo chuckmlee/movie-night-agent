@@ -130,8 +130,8 @@ def loved(e: dict) -> bool:
 
 
 def _details(tmdb_id: int) -> dict:
-    d = tmdb._get(f"/movie/{tmdb_id}", append_to_response="keywords,recommendations,watch/providers,videos")
-    return {
+    d = tmdb._get(f"/movie/{tmdb_id}", append_to_response="keywords,recommendations,watch/providers,videos,credits")
+    return {**tmdb.people(d),
         "tmdb_id": d["id"],
         "title": d.get("title"),
         "year": int(d["release_date"][:4]) if d.get("release_date") else None,
@@ -382,7 +382,7 @@ def build(username: str, data: Path, export: Path | None = None, refresh: bool =
         "scores": {s.slug: [round(s.score, 2), pick_reason(s, cache[s.slug], p)] for s in rank(cache, p)},
         "wildcards": {f"tmdb-{w.slug}": {**{k: wstore[w.slug].get(k) for k in (
             "tmdb_id", "title", "year", "runtime_min", "genres", "availability", "trailer_url",
-            "poster_path", "keywords", "overview")},
+            "poster_path", "keywords", "overview", "directors", "cast", "countries", "language")},
             "wildcard": True, "on_watchlist": False, "score": round(w.score, 2),
             "reason": pick_reason(w, wstore[w.slug], p)}
             for w in wild},

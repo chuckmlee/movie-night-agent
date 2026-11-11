@@ -103,7 +103,7 @@ def sync(username: str, data: Path = DATA, limit: int | None = None, log=print) 
                 continue
             entry.update(runtime_min=e.runtime_min, genres=e.genres, trailer_url=e.trailer_url,
                          overview=e.overview, availability=asdict(e.availability), availability_checked=today,
-                         keywords=e.keywords, poster_path=e.poster_path)
+                         keywords=e.keywords, poster_path=e.poster_path, **e.meta)
             time.sleep(TMDB_DELAY)
         elif "keywords" not in entry:  # backfill for films cached before keywords existed
             try:
@@ -114,6 +114,17 @@ def sync(username: str, data: Path = DATA, limit: int | None = None, log=print) 
                 log(f"  tmdb keywords failed for {f.slug}: {err}")
             except urllib.error.URLError as err:
                 log(f"  tmdb keywords failed for {f.slug}: {err}")
+            time.sleep(TMDB_DELAY)
+        if "directors" not in entry:  # backfill for films cached before credits existed (Nov 11)
+            try:
+                entry.update(tmdb.credits_meta(entry["tmdb_id"]))
+                stats["credits_backfilled"] = stats.get("credits_backfilled", 0) + 1
+            except urllib.error.HTTPError as err:
+                if err.code == 404:
+                    entry["directors"] = []  # TMDB doesn't know this id; don't retry every night
+                log(f"  tmdb credits failed for {f.slug}: {err}")
+            except urllib.error.URLError as err:
+                log(f"  tmdb credits failed for {f.slug}: {err}")
             time.sleep(TMDB_DELAY)
         save_json(cache_path, cache)
 

@@ -59,6 +59,7 @@ class Enrichment:
     availability: Availability
     keywords: list[str] = field(default_factory=list)  # TMDB topic tags, e.g. "spy", "folk horror"
     poster_path: str | None = None  # e.g. "/x2FJsf1ElAgr63Y3PNPtJrcmpoe.jpg"; see linq_format.POSTER_BASE
+    meta: dict = field(default_factory=dict)  # people(): directors, cast, countries, language
 
 
 def _get(path: str, **params) -> dict:
@@ -116,11 +117,34 @@ def parse_details(d: dict) -> Enrichment:
         availability=parse_availability(((d.get("watch/providers") or {}).get("results") or {}).get("US")),
         keywords=[k["name"] for k in (d.get("keywords") or {}).get("keywords", [])],
         poster_path=d.get("poster_path"),
+        meta=people(d),
     )
 
 
 def enrich(tmdb_id: int) -> Enrichment:
-    return parse_details(_get(f"/movie/{tmdb_id}", append_to_response="videos,watch/providers,keywords"))
+    return parse_details(_get(f"/movie/{tmdb_id}", append_to_response="videos,watch/providers,keywords,credits"))
+
+
+CAST = 5
+
+
+def people(d: dict) -> dict:
+    """Director(s), top-billed cast, countries and original language from a details
+    response fetched with append_to_response=credits."""
+    credits = d.get("credits") or {}
+    code = d.get("original_language")
+    lang = next((x.get("english_name") for x in d.get("spoken_languages") or [] if x.get("iso_639_1") == code), None)
+    return {
+        "directors": [c["name"] for c in credits.get("crew", []) if c.get("job") == "Director"],
+        "cast": [c["name"] for c in sorted(credits.get("cast", []), key=lambda c: c.get("order", 99))[:CAST]],
+        "countries": [c["name"] for c in d.get("production_countries") or []],
+        "language": lang or code,
+    }
+
+
+def credits_meta(tmdb_id: int) -> dict:
+    """people() for one film; the sync uses it to backfill films cached before credits were stored."""
+    return people(_get(f"/movie/{tmdb_id}", append_to_response="credits"))
 
 
 def poster_path(tmdb_id: int) -> str | None:
@@ -161,8 +185,8 @@ def search(title: str, year: int | None = None) -> dict | None:
     if not results:
         return None
     best = best_match(title, results)
-    d = _get(f"/movie/{best['id']}", append_to_response="keywords,recommendations,similar")
-    return {
+    d = _get(f"/movie/{best['id']}", append_to_response="keywords,recommendations,similar,credits")
+    return {**people(d),
         "tmdb_id": d["id"],
         "title": d.get("title"),
         "year": int(d["release_date"][:4]) if d.get("release_date") else None,

@@ -35,7 +35,7 @@ class Blend(unittest.TestCase):
         self.assertEqual(q["tmdb-1"]["parts"]["letterboxd"], 100.0)
         self.assertAlmostEqual(q["tmdb-1"]["parts"]["circle"], 55.6, delta=1)
         # Only Letterboxd for film 3: its score is that percentile alone, not dragged down by missing data.
-        self.assertEqual(q["tmdb-3"], {"score": 0.0, "sources": 1, "parts": {"letterboxd": 0.0}})
+        self.assertEqual(q["tmdb-3"], {"score": 0.0, "sources": 1, "parts": {"letterboxd": 0.0}, "raw": {"letterboxd": 3.0}})
         self.assertGreater(q["tmdb-1"]["score"], q["tmdb-2"]["score"])
 
     def test_circle_has_diminishing_returns(self):
@@ -80,3 +80,38 @@ class Ranking(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Presentation(unittest.TestCase):
+    def q(self, parts, raw, score=80.0):
+        return {"quality_info": {"score": score, "sources": len(parts), "parts": parts, "raw": raw},
+                "letterboxd_rating": raw.get("letterboxd")}
+
+    def test_circle_comes_first(self):
+        e = self.q({"letterboxd": 90, "critics": 95, "circle": 70}, {"letterboxd": 4.2, "rt": 96, "fans": 3}, 86.4)
+        self.assertEqual(quality.line(e), "86/100 · 3 people you follow loved it")
+
+    def test_split_then_best_source(self):
+        e = self.q({"letterboxd": 40, "imdb": 30, "critics": 92}, {"letterboxd": 3.4, "rt": 94, "imdb": 6.6})
+        self.assertEqual(quality.line(e), "80/100 · critics love it, fans split")
+        e = self.q({"letterboxd": 85, "critics": 78}, {"letterboxd": 4.1, "rt": 88})
+        self.assertEqual(quality.line(e), "80/100 · ★ 4.1 on Letterboxd")
+        e = self.q({"letterboxd": 70, "critics": 91}, {"letterboxd": 3.9, "mc": 88})
+        self.assertEqual(quality.line(e), "80/100 · critics' favorite")
+        e = self.q({"letterboxd": 70, "critics": 60}, {"letterboxd": 3.9, "mc": 66})
+        self.assertEqual(quality.line(e), "80/100 · ★ 3.9 on Letterboxd")
+        e = self.q({"letterboxd": 70, "critics": 91}, {"letterboxd": 3.9, "rt": 94})
+        self.assertEqual(quality.line(e), "80/100 · critics' favorite")
+        e = self.q({"letterboxd": 90, "critics": 95, "circle": 70}, {"letterboxd": 4.2, "rt": 96, "fans": 3})
+        self.assertEqual(quality.line(e, skip_circle=True), "80/100 · critics' favorite")  # the quote says it
+
+    def test_one_source_shows_the_source_not_a_number(self):
+        e = self.q({"letterboxd": 85}, {"letterboxd": 4.1})
+        self.assertEqual(quality.line(e), "★ 4.1 on Letterboxd")
+        self.assertEqual(quality.line({"letterboxd_rating": 3.7}), "★ 3.7 on Letterboxd")
+
+    def test_blend_keeps_raw_values_for_the_highlight(self):
+        entries = {"a": film(1, 4.2), "b": film(2, 3.5)}
+        ratings = {"tmdb-1": {"rt": 95, "mc": 85}, "tmdb-2": {"rt": 60}}
+        q = quality.blend(entries, ratings, {1: {"score": 2.0, "people": [{"signal": 1.0}, {"signal": 1.0}]}})
+        self.assertEqual(q["tmdb-1"]["raw"], {"letterboxd": 4.2, "rt": 95, "mc": 85, "fans": 2})

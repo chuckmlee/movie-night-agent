@@ -470,7 +470,7 @@ def step(linq: Linq, chat_id: str, state: State, cache: dict, history: list[dict
         marks = emojis({s: cache[s] for s in slugs})
         for slug in slugs:
             ensure_poster(cache[slug], posters)
-            label = linq_format.WILDCARD_LABEL if slug in p.wildcards else linq_format.WATCHLIST_LABEL
+            label = linq_format.WILDCARD_LABEL if slug in p.wildcards else None  # label only the exception
             body = linq_format.pick_message(
                 linq_format.pick_from_cache(cache[slug], p.reasons.get(slug), marks.get(slug), label))
             msg_to_slug[linq.send(chat_id, body)] = slug

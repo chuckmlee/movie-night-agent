@@ -177,9 +177,54 @@ def blend(entries: dict, ratings: dict, circle: dict[int, dict] | None = None,
         if not parts:
             continue
         w = sum(weights[s] for s in parts)
+        r = ratings.get(k) or {}
+        raw_vals = {"letterboxd": e.get("letterboxd_rating"), "rt": r.get("rt"), "mc": r.get("mc"),
+                    "imdb": r.get("imdb") if "imdb" in parts else None,
+                    "fans": sum(1 for p in (c or {}).get("people", []) if p.get("signal", 0) > 0)}
         out[k] = {"score": round(sum(weights[s] * v for s, v in parts.items()) / w, 1),
-                  "sources": len(parts), "parts": parts}
+                  "sources": len(parts), "parts": parts, "raw": {a: b for a, b in raw_vals.items() if b}}
     return out
+
+
+SPLIT = 35  # percentile gap between critics and audiences that is worth saying out loud
+
+
+def highlight(q: dict) -> str | None:
+    """The one thing that best explains a film's score (Chuck, Nov 11):
+    the circle's love first, then a sharp critics/audience split, then the best source."""
+    parts, raw = q.get("parts") or {}, q.get("raw") or {}
+    fans = raw.get("fans", 0)
+    if fans and parts.get("circle", 0) > 0:
+        return "someone you follow loved it" if fans == 1 else f"{fans} people you follow loved it"
+    aud = [parts[s] for s in ("letterboxd", "imdb") if s in parts]
+    if "critics" in parts and aud:
+        gap = parts["critics"] - sum(aud) / len(aud)
+        if gap >= SPLIT:
+            return "critics love it, audiences are split"
+        if gap <= -SPLIT:
+            return "audiences love it more than critics do"
+    best = max((s for s in parts if s != "circle"), key=lambda s: parts[s], default=None)
+    if best == "critics":
+        crit = f"{raw['rt']}% on Rotten Tomatoes" if raw.get("rt") is not None else f"{raw.get('mc')} on Metacritic"
+        return f"critics' favorite ({crit})" if parts["critics"] >= 70 else crit
+    if best == "letterboxd" and raw.get("letterboxd"):
+        return f"★ {raw['letterboxd']:.1f} on Letterboxd"
+    if best == "imdb" and raw.get("imdb"):
+        return f"{raw['imdb']:.1f} on IMDb"
+    return None
+
+
+def line(entry: dict) -> str | None:
+    """The score line under a pick: "86/100, critics' favorite (94% on Rotten Tomatoes)".
+
+    One source isn't enough for a number that looks certain, so then it's that
+    source as-is ("★ 4.1 on Letterboxd"), as before the blended score."""
+    q = entry.get("quality_info")
+    lb = entry.get("letterboxd_rating")
+    if not q or q.get("sources", 0) < 2:
+        return f"★ {lb:.1f} on Letterboxd" if lb else None
+    h = highlight(q)
+    return f"{round(q['score'])}/100" + (f", {h}" if h else "")
 
 
 def build(entries: dict, data: Path, log=print) -> dict:
@@ -206,3 +251,4 @@ def annotate(cache: dict, q: dict) -> None:
         k = key(e)
         if k in q:
             e["quality"] = q[k]["score"]
+            e["quality_info"] = q[k]

@@ -134,8 +134,9 @@ class Plan:
 
 
 def _rating_line(e: dict) -> str | None:
-    r = e.get("letterboxd_rating")
-    return f"★ {r:.1f} on Letterboxd" if r else None
+    """The blended score and its highlight once ratings are in (movie_night.quality); Letterboxd until then."""
+    from .quality import line
+    return line(e)
 
 
 def ask_pool(cache: dict, h: Hints, exclude: set[str], scores: dict, seed_film: dict | None,
@@ -242,8 +243,9 @@ def plan(text: str, cache: dict, exclude: set[str] = frozenset(), seed: int | No
             if line:
                 reasons[s] = line
         for s in wild:
-            if cache[s].get("reason"):  # the 🃏 label goes on the pick message itself
-                reasons[s] = cache[s]["reason"]
+            line = " · ".join(x for x in (cache[s].get("reason"), _rating_line(cache[s])) if x)
+            if line:  # the 🃏 label goes on the pick message itself
+                reasons[s] = line
         return Plan(slugs + wild, reasons, wildcards=wild)
 
     result = run(hints)

@@ -75,6 +75,13 @@ support, and don't give away twists or endings.
 Also write `note`: the whole ask, follow-ups included, restated in at most 8 words, like "Like The Devils, less shocking"."""
 
 
+def _festival(e: dict) -> str | None:
+    f = e.get("festival") or {}
+    if not f.get("rank"):
+        return None
+    return f"{f['name']}: critics ranked it #{f['rank']} of {f['of']}, mean {f['critics']:.1f}/10 from {f['n']}"
+
+
 def _line(slug: str, e: dict) -> str:
     return json.dumps({
         "id": slug,
@@ -87,6 +94,7 @@ def _line(slug: str, e: dict) -> str:
         "honors": (e.get("honors") or {}).get("wins") or None,
         "criterion": bool((e.get("honors") or {}).get("criterion")) or None,
         "circle_loved_for": e.get("circle_loved") or None,
+        "festival_critics": _festival(e),
         "synopsis": (e.get("overview") or "")[:350],
     }, ensure_ascii=False)
 

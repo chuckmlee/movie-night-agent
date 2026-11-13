@@ -277,3 +277,12 @@ How it's used:
   The line shows rank because festival means bunch up: Sentimental Value won the Grand Prix with a 6.5 mean.
 - **Claude** sees the rank and mean for nuanced asks.
 - **Honors.** Jury prizes fill in honors when Wikidata hasn't caught up on a recent festival yet.
+
+## Quieter morning logs (Nov 13)
+
+- Three watchlist films (Dekalog, Serial Experiments Lain, Caligula: The Ultimate Cut) and two circle-loved
+  films point at TMDB ids that TMDB answers with 404. They used to be looked up again every morning. They're now
+  marked `tmdb_missing` and rechecked once a month.
+- Delo's log lines go to stdout. Railway marks everything on stderr as an error, so every line showed red.
+- The taste line now counts taste twins and coming-soon films. The quality line counts films with festival
+  critics.

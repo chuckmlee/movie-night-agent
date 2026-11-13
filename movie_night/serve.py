@@ -56,7 +56,7 @@ STATUS = {"started": dt.datetime.now(dt.timezone.utc).isoformat(), "last_poll": 
 
 
 def log(msg: str) -> None:
-    print(dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), msg, file=sys.stderr, flush=True)
+    print(dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), msg, flush=True)  # stdout: Railway marks every stderr line as an error
 
 
 class Handler(BaseHTTPRequestHandler):

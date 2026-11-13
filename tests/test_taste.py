@@ -119,6 +119,28 @@ class CircleWildcards(unittest.TestCase):
         finally:
             t._details = real
 
+    def test_dropped_ids_wait_a_month(self):
+        import urllib.error
+        import movie_night.taste as t
+        calls = []
+
+        def gone(rid):
+            calls.append(rid)
+            raise urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+
+        real, t._details = t._details, gone
+        try:
+            store = {}
+            self.wildcards(CACHE, self.p, store, lookups=10, log=lambda m: None)
+            first = len(calls)
+            self.wildcards(CACHE, self.p, store, lookups=10, log=lambda m: None)
+            self.assertEqual(len(calls), first)  # not asked again the next morning
+            store["21"]["tmdb_missing"] = "2000-01-01"
+            self.wildcards(CACHE, self.p, store, lookups=10, log=lambda m: None)
+            self.assertEqual(calls[first:], [21])  # but a month on, it is
+        finally:
+            t._details = real
+
     def test_build_keeps_only_watchable(self):
         import json, tempfile
         import movie_night.circle as c

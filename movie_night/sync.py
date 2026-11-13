@@ -28,6 +28,7 @@ from .watchlist import read_film_page, read_watchlist
 
 DATA = Path("data")
 RATING_MAX_AGE_DAYS = 7
+MISSING_RETRY_DAYS = 30  # recheck ids TMDB 404s on, in case they come back
 RATING_REFRESH_PER_RUN = 40
 LETTERBOXD_DELAY = 1.0
 TMDB_DELAY = 0.05
@@ -94,9 +95,20 @@ def sync(username: str, data: Path = DATA, limit: int | None = None, log=print) 
         if entry.get("tmdb_id") is None:
             stats["no_tmdb"] += 1
             continue
+        if entry.get("tmdb_missing", "") >= (dt.date.today() - dt.timedelta(days=MISSING_RETRY_DAYS)).isoformat():
+            stats["tmdb_missing"] = stats.get("tmdb_missing", 0) + 1
+            continue  # Letterboxd points at an id TMDB doesn't have (Dekalog, Nov 13); look again monthly
         if "runtime_min" not in entry:
             try:
                 e = tmdb.enrich(entry["tmdb_id"])
+            except urllib.error.HTTPError as err:
+                if err.code == 404:
+                    entry["tmdb_missing"] = today
+                    stats["tmdb_missing"] = stats.get("tmdb_missing", 0) + 1
+                else:
+                    stats["enrich_failed"] += 1
+                log(f"  tmdb failed for {f.slug}: {err}")
+                continue
             except urllib.error.URLError as err:
                 log(f"  tmdb failed for {f.slug}: {err}")
                 stats["enrich_failed"] += 1
@@ -143,7 +155,7 @@ def sync(username: str, data: Path = DATA, limit: int | None = None, log=print) 
     snapshot = {}
     for slug in on_list:
         entry = cache.get(slug, {})
-        if entry.get("tmdb_id") is None:
+        if entry.get("tmdb_id") is None or entry.get("tmdb_missing"):
             continue
         if entry.get("availability_checked") != today:
             try:

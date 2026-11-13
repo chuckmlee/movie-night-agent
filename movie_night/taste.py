@@ -295,6 +295,13 @@ def agreement(fans: float) -> float:
     return AGREE_SCALE * (1 - math.exp(-fans / 4))
 
 
+MISSING_RETRY_DAYS = 30
+
+
+def _missing_retry() -> str:
+    return (dt.date.today() - dt.timedelta(days=MISSING_RETRY_DAYS)).isoformat()
+
+
 def wildcards(cache: dict, p: Profile, store: dict, lookups: int = WILDCARD_LOOKUPS, log=print) -> list[Scored]:
     """Films the household hasn't rated or saved that someone they follow loved,
     most-agreed-on first."""
@@ -305,17 +312,24 @@ def wildcards(cache: dict, p: Profile, store: dict, lookups: int = WILDCARD_LOOK
     out, fetched = [], 0
     for rid in cands:
         key = str(rid)
-        if key not in store:
+        if key not in store or store[key].get("tmdb_missing", "9") < _missing_retry():
             if fetched >= lookups:
                 continue  # tomorrow's run picks it up
             try:
                 store[key] = _details(rid)
+            except urllib.error.HTTPError as err:
+                if err.code == 404:  # an id TMDB has dropped; look again in a month, not every morning
+                    store[key] = {"tmdb_missing": dt.date.today().isoformat()}
+                log(f"  tmdb failed for wildcard {rid}: {err}")
+                continue
             except urllib.error.URLError as err:
                 log(f"  tmdb failed for wildcard {rid}: {err}")
                 continue
             fetched += 1
             time.sleep(0.05)
         e = store[key]
+        if e.get("tmdb_missing"):
+            continue
         c = p.circle[rid]
         fans = len(c["fans"])
         new_release = (e.get("year") or 0) >= dt.date.today().year - 1  # too new for many votes
@@ -450,7 +464,8 @@ def build(username: str, data: Path, export: Path | None = None, refresh: bool =
         "circle_loved": {str(t): c["loved"] for t, c in p.circle.items() if c.get("loved") and c["score"] > 0},
     }
     (data / "taste.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
-    log(f"taste: profile from {len(store)} films, {len(out['scores'])} watchlist scores, {len(wild)} wildcards")
+    log(f"taste: profile from {len(store)} films, {len(out['scores'])} watchlist scores, {len(wild)} wildcards, "
+        f"{len(p.twins)} taste twins, {len(out['coming_soon'])} coming soon")
     return out
 
 

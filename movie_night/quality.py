@@ -257,7 +257,7 @@ def build(entries: dict, data: Path, log=print) -> dict:
             fest[key(e)] = festivals.percentile({"festival": f})
     q = blend(entries, ratings, circle_mod.scores(circle_mod.load(data)), festival=fest)
     (data / "quality.json").write_text(json.dumps(q, indent=1))
-    log(f"quality: scored {len(q)} films")
+    log(f"quality: scored {len(q)} films, {len(fest)} with festival critics")
     return q
 
 
